@@ -1,14 +1,14 @@
 ---
 # use this drops.json + any patches to start
-base: drops.json
+base: ../OpenFusion/tdata/drops.json
 patches:
-  - patch/1013
-
+  - ../OpenFusion/tdata/patch/1013/drops.json
+# path of your xdt JSON file (xdt.json or xdt1013.json)
+xdt: ../OpenFusion/tdata/xdt1013.json
+# output folder will be created if not present, and the outputs will be inside this folder
+output: target/
 # yes generates a patch, no generates a single merged drops.json in the "output" folder
 generate-patch: yes
-
-# path of your xdt JSON file (xdt.json or xdt1013.json)
-xdt: xdt1013.json
 
 # describe how you want to adjust the rarity of items here
 items:
@@ -22,12 +22,12 @@ items:
 
     # then choose one of the below methods to describe the desired rarity of the item
     # we will try to match what is described here
-    # if multiple ways are used to describe the rarity of the item, we will use one of them an disregard the rest
+    # if multiple ways are used to describe the rarity of the item, we will use one of them and disregard the rest
     # you will be shown what the achieved real rarity is at the end of the script
 
-    # approximately how many kills get you the item, all crate and rarity rolls considered
+    # approximately how many kills from any mob get you the item, all crate and rarity rolls considered
     number-of-kills-till-item: 1200
-    # approximately how mant kills from certain mobs get you the item, all crate and rarity rolls considered
+    # approximately how many kills from certain mobs get you the item, all crate and rarity rolls considered
     number-of-kills-till-item-per-mob:
       # mob id and the number of kills
       123: 1200
@@ -49,6 +49,8 @@ items:
       Sooper: 500
       Sooper Dooper: 100
       # you can also use aliases for crate types, i.e. Gumball for ETC, Gray for Standard, Bronze or Orange for Special, Silver for Sooper, and Gold for Sooper Dooper
+  - name: Couture Rifle
+    number-of-kills-till-item: 12000
   # let's add a proper example for another item
   - name: Hot Pants Ray Gun
     number-of-crates-till-item-per-crate-type:
