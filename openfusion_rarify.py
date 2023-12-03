@@ -385,6 +385,36 @@ class ItemConfig:
         )
 
 
+"""
+requirements:
+- nodes and edges with both way calculations
+- duplication of nodes and edges from a point onward
+- nodes keep requirements
+- satisfiability through global itemset-based counts
+- whatever needs to empose crate or mob-based discriminations will fork the graph (or maybe as needed?)
+- saving through one call from the root
+- get all modifications (also kept at nodes) from one call from the root
+- different node types (root, itemset, mob etc)
+- treat egg types as the same as crate types???
+- racing crates only propagate up to the crate level, so do eggs (maybe use separate keys for these?)
+- get multiple requirements?
+- decide on satisfaction order (or see if it doesnt matter - hopefully)
+"""
+class Node:
+    def __init__(self) -> None:
+        self.is_root = False
+        self.up_edges = {}
+        self.down_edges = {}
+
+
+class Edge:
+    def __init__(self) -> None:
+        self.node_one = None
+        self.node_two = None
+        self.one_to_two = None
+        self.two_to_one = None
+
+
 def alter_chances(knowledge_base: KnowledgeBase, item_configs: List[ItemConfig]):
     affected_items = {
         knowledge_base.tuple_irid_map[(item_config.type, item_config.id)]: item_config
