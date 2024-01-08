@@ -26,20 +26,26 @@ items:
     # you will be shown what the achieved real rarity is at the end of the script
 
     # approximately how many kills from any mob get you the item, all crate and rarity rolls considered
-    number-of-kills-till-item: 1200
+    kills-till-item: 1200
     # approximately how many kills from certain mobs get you the item, all crate and rarity rolls considered
-    number-of-kills-till-item-per-mob:
+    kills-till-item-per-mob:
       # mob id and the number of kills
       123: 1200
       # or mob name (if it uniquely refers to 1 mob) and the number of kills
       Scoria Cephalopod: 1300
       # mobs not mentioned here will not have their rarities changed
+      Otherwise: 0
 
     # approximately how many crates get you the item, all crate and rarity rolls considered
-    number-of-crates-till-item: 250
+    crates-till-item: 250
+    # approximately how many crates from certain mobs get you the item, all crate and rarity rolls considered
+    crates-till-item-per-mob:
+      123: 40
+      Scoria Cephalopod: 120
+      Others: 0
     # approximately how many crates from certain crate types get you the item, all crate and rarity rolls considered
     # NOTE: only ONE of these will be matched, and that is the one that makes dropping this item easiest, so that we at least make the easiest case as hard as possible
-    number-of-crates-till-item-per-crate-type:
+    crates-till-item-per-crate-type:
       # negative values will be ignored
       ETC: -1
       # you can also just not mention certain crate types, they will be ignored as well
@@ -48,15 +54,67 @@ items:
       Special: 1000
       Sooper: 500
       Sooper Dooper: 100
+      Other: 0
       # you can also use aliases for crate types, i.e. Gumball for ETC, Gray for Standard, Bronze or Orange for Special, Silver for Sooper, and Gold for Sooper Dooper
+    # approximately how many crates from certain crate types from certain mobs get you the item, all crate and rarity rolls considered
+    crates-till-item-per-mob-and-crate-type:
+      Scoria Cephalopod:
+        Sooper: 300
+        Sooper Dooper: 100
+    # approximately how many crates from certain crate types from certain mobs get you the item, all crate and rarity rolls considered
+    crates-till-item-per-crate-type-and-mob:
+      Sooper Dooper:
+        123: 40
+        Scoria Cephalopod: 120
+
+    # approximately how many kills in certain events get you the item
+    event-kills-till-item:
+      Knishmas: 1000
+      2: 3000
+    # approximately how many crates from certain events get you the item
+    event-crates-till-item:
+      Knishmas: 333
+      2: 999
+
+    # approximately how many crates of certain crate types from certain infected zones get you the item
+    race-crates-till-item:
+      20:
+        Gold: 12
+      Green Gullet:
+        Gold: 12
+
+    # approximately how many mission crates of certain levels get you the item
+    mission-crates-till-item:
+      # all mission crates of a certain level are assumed to be identical
+      36: 1000
+
+    # approximately how many egger eggs from certain areas get you the item
+    egger-eggs-till-item:
+      # you can use the egger names here: Future, Suburbs, Wilds, Downtown, Darklands
+      Wilds:
+        Standard: 124
+        Sooper Dooper: 10
+
+    # approximately how many golden egg crates from certain areas get you the item
+    golden-eggs-till-item:
+      # all egg crates from an area is assumed to have the same drop list, so this should be okay
+      Mount Blackhead: 34
+
+    # approximately how many of a certain specific crate get you the item
+    named-crates-till-item:
+      # you can use crate ids or certain names
+      100: 10000
+      Spring Chicken Egg: 80
+
+  # let's add an example for another item in the same drop list
   - name: Couture Rifle
-    number-of-kills-till-item: 12000
-  # let's add a proper example for another item
+    kills-till-item: 12000
+  # let's add an example for another item in a separate drop list
   - name: Hot Pants Ray Gun
-    number-of-crates-till-item-per-crate-type:
+    crates-till-item-per-crate-type:
       Silver: 50
       Gold: 10
   # follow a similar example for your items, watch the spaces and make sure your text is aligned
   - type: 0
     id: 3
-    number-of-kills-till-item: 30
+    kills-till-item: 30

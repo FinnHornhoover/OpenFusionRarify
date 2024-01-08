@@ -261,6 +261,13 @@ class ItemConfig:
     number_of_kills_till_item_per_mob: Union[None, Dict[int, int]]
     number_of_crates_till_item: Union[None, int]
     number_of_crates_till_item_per_crate_type: Union[None, Dict[str, int]]
+    number_of_crates_till_item_per_mob_and_crate_type: Union[None, Dict[int, Dict[str, int]]]
+    number_of_crates_till_item_per_crate_type_and_mob: Union[None, Dict[str, Dict[int, int]]]
+    number_of_event_kills_till_item: Union[None, Dict[int, Dict[str, int]]]
+    number_of_event_crates_till_item: Union[None, Dict[int, Dict[str, int]]]
+    number_of_race_crates_till_item: Union[None, Dict[int, Dict[str, int]]]
+    number_of_eggs_till_item: Union[None, Dict[str, Dict[str, int]]]
+    number_of_golden_egg_crates_till_item: Union[None, Dict[str, int]]
 
     @staticmethod
     def from_dict(knowledge_base: KnowledgeBase, data: Dict[str, Any]):
@@ -312,6 +319,13 @@ class ItemConfig:
             'number_of_kills_till_item_per_mob': None,
             'number_of_crates_till_item': None,
             'number_of_crates_till_item_per_crate_type': None,
+            'number_of_crates_till_item_per_mob_and_crate_type': None,
+            'number_of_crates_till_item_per_crate_type_and_mob': None,
+            'number_of_event_kills_till_item': None,
+            'number_of_event_crates_till_item': None,
+            'number_of_race_crates_till_item': None,
+            'number_of_eggs_till_item': None,
+            'number_of_golden_egg_crates_till_item': None,
         }
         criterion = None
 
@@ -341,7 +355,7 @@ class ItemConfig:
                     if len(mob_ids) > 1:
                         print('Warning: Mob name', key, 'refers to mobs', mob_ids, ', using', mob_id, '...')
 
-                    mob = knowledge_base.npc_map.get(mob_id)
+                mob = knowledge_base.npc_map.get(mob_id)
 
                 if not mob:
                     print('Warning: Mob', key, 'could not be found, skipping...')
@@ -400,19 +414,52 @@ requirements:
 - get multiple requirements?
 - decide on satisfaction order (or see if it doesnt matter - hopefully)
 """
-class Node:
-    def __init__(self) -> None:
-        self.is_root = False
+class RarifyNode:
+    def __init__(
+        self,
+        name: str,
+        json_path: List[str],
+        is_root: bool = False,
+        agg_method: str = 'none',
+    ) -> None:
+        self.name = name
+        self.json_path = json_path
+        self.is_root = is_root
+        self.agg_method = agg_method
         self.up_edges = {}
         self.down_edges = {}
 
 
-class Edge:
+class RarifyEdge:
+    def __init__(
+        self,
+        node_up: RarifyNode,
+        node_down: RarifyNode,
+        up_coef: float,
+        down_coef: float,
+    ) -> None:
+        self.node_up = node_up
+        self.node_down = node_down
+        self.up_coef = up_coef
+        self.down_coef = down_coef
+
+
+class RarifyGraph:
     def __init__(self) -> None:
-        self.node_one = None
-        self.node_two = None
-        self.one_to_two = None
-        self.two_to_one = None
+        self.root_node = RarifyNode('root', [], is_root=True)
+        self.item_references = {}
+        self.item_sets = {}
+        self.crates = {}
+        self.crate_drop_types = {}
+        self.mob_drops = {}
+        self.mobs = {}
+        self.events = {}
+
+    def __add_by_kill_count(self) -> None:
+        pass
+
+    def add(self, item_config: ItemConfig) -> None:
+        pass
 
 
 def alter_chances(knowledge_base: KnowledgeBase, item_configs: List[ItemConfig]):
@@ -696,7 +743,7 @@ def main():
 
     config = Config(
         base=Path(config_data['base']),
-        patches=[Path(patch_path) for patch_path in config_data['patches']],
+        patches=[Path(patch_path) for patch_path in (config_data.get('patches') or [])],
         xdt=Path(config_data['xdt']),
         output=Path(config_data['output']),
         generate_patch=config_data['generate-patch'],
