@@ -24,7 +24,7 @@ def main() -> None:
         filename='rarify.log',
         filemode='w',
         level=logging.INFO,
-        format='[%(levelname)s @ %(asctime)s] %(message)s'
+        format='[%(levelname)7s @ %(asctime)s] %(message)s'
     )
 
     config_path = Path('rarifyconfig.yml' if len(sys.argv) < 2 else sys.argv[1])

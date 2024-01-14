@@ -30,7 +30,7 @@ items:
     # approximately how many kills from certain mobs get you the item, all crate and rarity rolls considered
     kills-till-item-per-mob:
       # mob id and the number of kills
-      123: 1200
+      109: 1200
       # or mob name (if it uniquely refers to 1 mob) and the number of kills
       Scoria Cephalopod: 1300
       # mobs not mentioned here will not have their rarities changed
@@ -40,7 +40,7 @@ items:
     crates-till-item: 250
     # approximately how many crates from certain mobs get you the item, all crate and rarity rolls considered
     crates-till-item-per-mob:
-      123: 40
+      109: 40
       Scoria Cephalopod: 120
       Others: 0
     # approximately how many crates from certain crate types get you the item, all crate and rarity rolls considered
@@ -64,7 +64,7 @@ items:
     # approximately how many crates from certain crate types from certain mobs get you the item, all crate and rarity rolls considered
     crates-till-item-per-crate-type-and-mob:
       Sooper Dooper:
-        123: 40
+        109: 40
         Scoria Cephalopod: 120
 
     # approximately how many kills in certain events get you the item
@@ -104,7 +104,7 @@ items:
     named-crates-till-item:
       # you can use crate ids or certain names
       100: 10000
-      Spring Chicken Egg: 80
+      Spring Chicken CRATE: 80
 
   # let's add an example for another item in the same drop list
   - name: Couture Rifle

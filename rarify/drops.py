@@ -154,8 +154,9 @@ class Data(dict):
             altered_values = [value] if isinstance(related_value, int) else value
 
             for related_value, altered_value in zip(related_values, altered_values):
-                self.references[(related_key, related_value)].remove(self_tuple)
-                self.references[(related_key, altered_value)].add(self_tuple)
+                if related_value != altered_value:
+                    self.references[(related_key, related_value)].remove(self_tuple)
+                    self.references[(related_key, altered_value)].add(self_tuple)
 
         super().__setitem__(key, value)
 
@@ -170,6 +171,14 @@ class Data(dict):
             self.references[(related_key, related_value)].remove(self_tuple)
 
         self[field_key].remove(related_value)
+
+    def deepcopy(self) -> 'Data':
+        return Data(
+            alt_dict=self.alt_dict,
+            str_key=self.str_key,
+            fk_names=self.fk_names,
+            value=dict(self.items()),
+        )
 
 
 class AlternateDict(dict):
@@ -274,9 +283,8 @@ class Drops(dict):
                         if fk_id <= alt_dict.lowest_id:
                             continue
 
-                        self.references[(data.main_key, int_key)].add((
-                            fk_map_names.get(fk_type, fk_type.split('ID')[0] + 's'),
-                            fk_id))
+                        fk_main_key = fk_map_names.get(fk_type, fk_type.split('ID')[0] + 's')
+                        self.references[(fk_main_key, fk_id)].add((data.main_key, int_key))
 
     def __getitem__(self, key: Union[str, Tuple[str, int]]) -> Union[AlternateDict, Data]:
         if isinstance(key, tuple):
