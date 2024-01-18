@@ -22,18 +22,19 @@ items:
 
     # then choose one of the below methods to describe the desired rarity of the item
     # we will try to match what is described here
-    # if multiple ways are used to describe the rarity of the item, we will use one of them and disregard the rest
-    # you will be shown what the achieved real rarity is at the end of the script
+    # if multiple ways are used to describe the rarity of the item, we will use all of them where applicable
+    # you will be shown what the achieved real rarity is at the end of the script in the log files
 
     # approximately how many kills from any mob get you the item, all crate and rarity rolls considered
     kills-till-item: 1200
     # approximately how many kills from certain mobs get you the item, all crate and rarity rolls considered
+    # Note that different values will work only if the specified monsters have different drop tables in the game, since we can't just invent new crates to give them
     kills-till-item-per-mob:
       # mob id and the number of kills
       109: 1200
-      # or mob name (if it uniquely refers to 1 mob) and the number of kills
+      # or mob name (good idea if it uniquely refers to 1 mob) and the number of kills
       Scoria Cephalopod: 1300
-      # mobs not mentioned here will not have their rarities changed
+      # mobs not mentioned here will not drop the item if you use the below keyword
       Otherwise: 0
 
     # approximately how many crates get you the item, all crate and rarity rolls considered
@@ -44,7 +45,6 @@ items:
       Scoria Cephalopod: 120
       Others: 0
     # approximately how many crates from certain crate types get you the item, all crate and rarity rolls considered
-    # NOTE: only ONE of these will be matched, and that is the one that makes dropping this item easiest, so that we at least make the easiest case as hard as possible
     crates-till-item-per-crate-type:
       # negative values will be ignored
       ETC: -1
