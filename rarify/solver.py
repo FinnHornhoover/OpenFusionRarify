@@ -1,4 +1,5 @@
 import math
+import json
 import logging
 from operator import itemgetter
 from collections import defaultdict
@@ -8,15 +9,15 @@ from .drops import Data
 from .knowledge_base import KnowledgeBase
 from .config import ItemConfig, OTHER_STANDARD_ID, OTHER_STANDARD_KEYWORD
 
-ABS_TOL = 0.5
+ABS_TOL = 0.01
 
 
 def inv(a: float) -> float:
-    return 1.0 / a if a > 0.0 else float('inf')
+    return 1.0 / a if a > 0.0 else float("inf")
 
 
 def abs_diff(a: float, b: float) -> float:
-    if a == float('inf') and b == float('inf'):
+    if a == float("inf") and b == float("inf"):
         return 0.0
     return abs(a - b)
 
@@ -25,36 +26,40 @@ class ItemSetNode:
     def __init__(self, knowledge_base: KnowledgeBase, is_id: int) -> None:
         self.knowledge_base = knowledge_base
         self.is_id = is_id
-        self.itemset: Data = knowledge_base.drops['ItemSets'][is_id]
+        self.itemset: Data = knowledge_base.drops["ItemSets"][is_id]
         self.probs_to_change = {
-            gender_id: {
-                rarity_id: {}
-                for rarity_id in range(1, 5)
-            }
+            gender_id: {rarity_id: {} for rarity_id in range(1, 5)}
             for gender_id in range(1, 3)
         }
 
     def effective_rarity_id(self, ir_id: int) -> int:
-        if self.itemset['IgnoreRarity']:
+        if self.itemset["IgnoreRarity"]:
             return 0
-        return self.itemset['AlterRarityMap'].get(
+        return self.itemset["AlterRarityMap"].get(
             str(ir_id),
-            self.knowledge_base.item_map[self.knowledge_base.irid_tuple_map[ir_id]].get('m_iRarity', 0)
+            self.knowledge_base.item_map[self.knowledge_base.irid_tuple_map[ir_id]].get(
+                "m_iRarity", 0
+            ),
         )
 
     def effective_gender_id(self, ir_id: int) -> int:
-        if self.itemset['IgnoreGender']:
+        if self.itemset["IgnoreGender"]:
             return 0
-        return self.itemset['AlterGenderMap'].get(
+        return self.itemset["AlterGenderMap"].get(
             str(ir_id),
-            self.knowledge_base.item_map[self.knowledge_base.irid_tuple_map[ir_id]].get('m_iReqSex', 0)
+            self.knowledge_base.item_map[self.knowledge_base.irid_tuple_map[ir_id]].get(
+                "m_iReqSex", 0
+            ),
         )
 
-    def register(self, ir_ids: List[int]) -> None:
-        for ir_id in ir_ids:
-            if ir_id not in self.itemset['ItemReferenceIDs']:
-                self.itemset['ItemReferenceIDs'].append(ir_id)
-                self.itemset['AlterItemWeightMap'][str(ir_id)] = 0
+    def register(self, ir_id: int, changed_rarity_id: int) -> None:
+        if ir_id not in self.itemset["ItemReferenceIDs"]:
+            self.itemset["ItemReferenceIDs"].append(ir_id)
+            self.itemset["AlterItemWeightMap"][str(ir_id)] = 0
+
+            rarity_id = self.effective_rarity_id(ir_id)
+            if rarity_id != 0 and changed_rarity_id != rarity_id:
+                self.itemset["AlterRarityMap"][str(ir_id)] = changed_rarity_id
 
     def drop_pool(
         self,
@@ -62,22 +67,19 @@ class ItemSetNode:
         gender_id: int,
         target_weights: Optional[Dict[int, float]] = None,
     ) -> Dict[int, float]:
-
         weights_filtered = {
-            ir_id: self.itemset['AlterItemWeightMap'].get(
-                str(ir_id),
-                self.itemset['DefaultItemWeight']
+            ir_id: self.itemset["AlterItemWeightMap"].get(
+                str(ir_id), self.itemset["DefaultItemWeight"]
             )
-            for ir_id in self.itemset['ItemReferenceIDs']
+            for ir_id in self.itemset["ItemReferenceIDs"]
             if (
-                self.effective_gender_id(ir_id) in [0, gender_id] and
-                self.effective_rarity_id(ir_id) in [0, rarity_id]
+                self.effective_gender_id(ir_id) in [0, gender_id]
+                and self.effective_rarity_id(ir_id) in [0, rarity_id]
             )
         }
         total_weight = sum(weights_filtered.values())
         weights_scaled = {
-            ir_id: weight / total_weight
-            for ir_id, weight in weights_filtered.items()
+            ir_id: weight / total_weight for ir_id, weight in weights_filtered.items()
         }
 
         if not target_weights:
@@ -89,51 +91,67 @@ class ItemSetNode:
             if ir_id in weights_scaled
         }
         total_target_weight = sum(target_weights_filtered.values())
-        total_non_target_weight = sum([w for ir_id, w in weights_scaled.items()
-                                       if ir_id not in target_weights_filtered])
-
-        if total_target_weight > 1.0 and any(
-            ir_id not in target_weights_filtered
-            for ir_id in weights_scaled
-        ):
-            logging.error(
-                'For ItemSet %s requested ItemReference:probability pairs sum up to '
-                'more than 1.0: %s',
-                self.is_id,
-                target_weights_filtered,
-            )
-            raise ValueError('The given target probabilities sum to more than 1.0.')
+        total_non_target_weight = sum(
+            [
+                w
+                for ir_id, w in weights_scaled.items()
+                if ir_id not in target_weights_filtered
+            ]
+        )
 
         # Assumption: ItemReferenceIDs is updated and contains all that it has to contain
         return {
             ir_id: (
                 target_weights_filtered[ir_id]
                 if ir_id in target_weights_filtered
-                else
-                (1. - total_target_weight) * weight / total_non_target_weight
+                else (1.0 - total_target_weight) * weight / total_non_target_weight
             )
             for ir_id, weight in weights_scaled.items()
         }
 
     def inject(self, ir_id: int, prob: float, agg: Callable = min) -> None:
-        self.register([ir_id])
-
         item_gender_id = self.effective_gender_id(ir_id)
         item_rarity_id = self.effective_rarity_id(ir_id)
 
         for gender_id, rarity_dicts in self.probs_to_change.items():
             for rarity_id, pool_dict in rarity_dicts.items():
-                if item_gender_id in [0, gender_id] and item_rarity_id in [0, rarity_id]:
+                if item_gender_id in [0, gender_id] and item_rarity_id in [
+                    0,
+                    rarity_id,
+                ]:
+                    other_probs_sum = sum(
+                        [
+                            value
+                            for other_ir_id, value in pool_dict.items()
+                            if other_ir_id != ir_id
+                        ]
+                    )
+
+                    if other_probs_sum + prob > 1.0:
+                        logging.warning(
+                            "ItemSet %s rejected probability %s for ItemReference %s "
+                            "as %s%s exceeds 1.0",
+                            self.is_id,
+                            prob,
+                            ir_id,
+                            (
+                                f"previously saved total probability {other_probs_sum} + "
+                                if other_probs_sum > 0
+                                else ""
+                            ),
+                            prob,
+                        )
+                        continue
+
                     pool_dict[ir_id] = agg([pool_dict.get(ir_id, prob), prob])
 
     def remove_zero_prob_entries(
         self,
         merged_probs: Dict[int, Dict[int, Dict[int, float]]],
     ) -> Dict[int, Dict[int, Dict[int, float]]]:
-
         zero_entries = {
             ir_id
-            for ir_id in self.itemset['ItemReferenceIDs']
+            for ir_id in self.itemset["ItemReferenceIDs"]
             if all(
                 prob_dict[ir_id] == 0.0
                 for rarity_dict in merged_probs.values()
@@ -159,14 +177,12 @@ class ItemSetNode:
         merged_probs: Dict[int, Dict[int, Dict[int, float]]],
         agg: Callable = min,
     ) -> Dict[int, Dict[int, Dict[int, int]]]:
-
         def apply_scale(prob_dict: Dict[int, float], scale: int) -> Dict[int, int]:
-            return {
-                ir_id: int(scale * value)
-                for ir_id, value in prob_dict.items()
-            }
+            return {ir_id: int(scale * value) for ir_id, value in prob_dict.items()}
 
-        def search(prob_dict: Dict[int, float], lo: int = 1, hi: int = (1 << 31) - 1) -> int:
+        def search(
+            prob_dict: Dict[int, float], lo: int = 1, hi: int = (1 << 31) - 1
+        ) -> int:
             if hi < lo:
                 return -1
 
@@ -199,14 +215,10 @@ class ItemSetNode:
             acc_to_scale = other_dict[select_ir_id] // scale_gcd
 
             return acc_to_scale, {
+                **{ir_id: value * acc_to_scale for ir_id, value in acc_dict.items()},
                 **{
-                    ir_id: value * acc_to_scale
-                    for ir_id, value in acc_dict.items()
+                    ir_id: value * other_to_scale for ir_id, value in other_dict.items()
                 },
-                **{
-                    ir_id: value * other_to_scale
-                    for ir_id, value in other_dict.items()
-                }
             }
 
         scales = {}
@@ -220,7 +232,9 @@ class ItemSetNode:
                 scale = search(prob_dict)
                 int_weights = apply_scale(prob_dict, scale)
 
-                multp, weights[gender_id] = merge_by_rarity(weights[gender_id], int_weights)
+                multp, weights[gender_id] = merge_by_rarity(
+                    weights[gender_id], int_weights
+                )
                 # this is a heuristic, but we have to do something meaningless here to decide
                 scales[gender_id] = max(scales[gender_id] * multp, scale)
 
@@ -235,7 +249,7 @@ class ItemSetNode:
                 ir_id: value
                 for ir_id, value in weights[main_gender_id].items()
                 if self.effective_gender_id(ir_id) == main_gender_id
-            }
+            },
         }
 
     def adjust_weight_settings(self, weights: Dict[int, int]) -> None:
@@ -243,13 +257,23 @@ class ItemSetNode:
         for weight in weights.values():
             counts[weight] += 1
 
-        entry_list = sorted(weights.items())
-        self.itemset['DefaultItemWeight'] = max(counts.items(), key=itemgetter(1))[0]
-        self.itemset['ItemReferenceIDs'] = [ir_id for ir_id, _ in entry_list]
-        self.itemset['AlterItemWeightMap'] = {
+        existing_ids = dict.fromkeys(self.itemset["ItemReferenceIDs"])
+        entry_list = []
+
+        for ir_id in existing_ids:
+            if ir_id in weights:
+                entry_list.append((ir_id, weights[ir_id]))
+
+        for ir_id, weight in sorted(weights.items()):
+            if ir_id not in existing_ids:
+                entry_list.append((ir_id, weight))
+
+        self.itemset["DefaultItemWeight"] = max(counts.items(), key=itemgetter(1))[0]
+        self.itemset["ItemReferenceIDs"] = [ir_id for ir_id, _ in entry_list]
+        self.itemset["AlterItemWeightMap"] = {
             str(ir_id): weight
             for ir_id, weight in entry_list
-            if weight != self.itemset['DefaultItemWeight']
+            if weight != self.itemset["DefaultItemWeight"]
         }
 
     def alter_drops_values(self, agg: Callable = min) -> None:
@@ -259,6 +283,23 @@ class ItemSetNode:
             for pool_dict in rarity_dicts.values()
         ):
             return
+
+        unchanged_probs = {
+            gender_id: {
+                rarity_id: self.drop_pool(
+                    rarity_id=rarity_id,
+                    gender_id=gender_id,
+                )
+                for rarity_id in rarity_dicts
+            }
+            for gender_id, rarity_dicts in self.probs_to_change.items()
+        }
+
+        logging.debug(
+            "ItemSet %s current pools %s",
+            self.is_id,
+            json.dumps(unchanged_probs, indent=4),
+        )
 
         merged_probs = {
             gender_id: {
@@ -272,8 +313,32 @@ class ItemSetNode:
             for gender_id, rarity_dicts in self.probs_to_change.items()
         }
 
+        logging.debug(
+            "ItemSet %s probs to change %s",
+            self.is_id,
+            json.dumps(self.probs_to_change, indent=4),
+        )
+
+        logging.debug(
+            "ItemSet %s changed pools %s",
+            self.is_id,
+            json.dumps(merged_probs, indent=4),
+        )
+
         clean_merged_probs = self.remove_zero_prob_entries(merged_probs)
+
+        logging.debug(
+            "ItemSet %s cleaned pools %s",
+            self.is_id,
+            json.dumps(clean_merged_probs, indent=4),
+        )
+
         int_weights = self.get_scaled_int_weights(clean_merged_probs, agg=agg)
+
+        logging.debug(
+            "ItemSet %s int weights %s", self.is_id, json.dumps(int_weights, indent=4)
+        )
+
         self.adjust_weight_settings(int_weights)
 
 
@@ -288,49 +353,109 @@ class CrateNode:
         self.itemset_register = itemset_register
         self.c_id = c_id
 
-        self.crate = knowledge_base.drops['Crates'][c_id]
-        self.rarity_weights = knowledge_base.drops['RarityWeights'][self.crate['RarityWeightID']]
+        self.crate = knowledge_base.drops["Crates"][c_id]
+        self.rarity_weights = knowledge_base.drops["RarityWeights"][
+            self.crate["RarityWeightID"]
+        ]
 
-        is_id = self.crate['ItemSetID']
+        is_id = self.crate["ItemSetID"]
         if is_id not in self.itemset_register:
             self.itemset_register[is_id] = ItemSetNode(knowledge_base, is_id)
 
         self.itemset_node = itemset_register[is_id]
 
+    def allowed_rarities(self, gender_id: int) -> Dict[int, int]:
+        return {
+            rarity_id: weight
+            for rarity_id, weight in zip(range(1, 5), self.rarity_weights["Weights"])
+            if (
+                weight > 0
+                and any(
+                    w > 0
+                    for w in self.itemset_node.drop_pool(
+                        gender_id=gender_id,
+                        rarity_id=rarity_id,
+                    ).values()
+                )
+            )
+        }
+
+    def register(self, ir_id: int) -> None:
+        item_tuple = self.knowledge_base.irid_tuple_map[ir_id]
+        item_gender_id = self.knowledge_base.item_map[item_tuple].get("m_iReqSex", 1)
+        item_rarity_id = self.knowledge_base.item_map[item_tuple].get("m_iRarity", 1)
+
+        changed_rarity = max(
+            rarity_id
+            for rarity_id in self.allowed_rarities(item_gender_id)
+            if rarity_id <= item_rarity_id
+        )
+        self.itemset_node.register(ir_id=ir_id, changed_rarity_id=changed_rarity)
+
     def discount_explained_prob(self, ir_id: int, prob: float) -> float:
         rarity_id = self.itemset_node.effective_rarity_id(ir_id)
 
         if rarity_id == 0:
-            return prob
+            logging.debug(
+                "Item %s probability %s is 0 rarity from crate %s to item set %s",
+                ir_id,
+                prob,
+                self.c_id,
+                self.crate["ItemSetID"],
+            )
+            # TODO: not sure about this one...
+            discounted_prob = prob
+        else:
+            gender_id = max(1, self.itemset_node.effective_gender_id(ir_id))
+            rw_weights = self.rarity_weights["Weights"]
+            rw_sum = sum(self.allowed_rarities(gender_id).values())
 
-        rw_weights = self.rarity_weights['Weights']
-        rw_sum = sum(rw_weights)
+            if len(rw_weights) < rarity_id or rw_weights[rarity_id - 1] == 0:
+                discounted_prob = 0.0
+                logging.debug(
+                    "Item %s probability %s is 0 due to rarity_id %s and weights %s from crate %s to item set %s",
+                    ir_id,
+                    prob,
+                    rarity_id,
+                    rw_weights,
+                    self.c_id,
+                    self.crate["ItemSetID"],
+                )
+            else:
+                discounted_prob = prob * rw_sum / rw_weights[rarity_id - 1]
 
-        if len(rw_weights) < rarity_id or rw_weights[rarity_id - 1] == 0:
-            return 0.0
-        return prob * rw_sum / rw_weights[rarity_id - 1]
+        logging.debug(
+            "Item %s probability %s discounted to %s from crate %s to item set %s",
+            ir_id,
+            prob,
+            discounted_prob,
+            self.c_id,
+            self.crate["ItemSetID"],
+        )
+
+        return discounted_prob
 
     def drop_pool(
         self,
         gender_id: int,
         target_weights: Optional[Dict[int, float]] = None,
     ) -> Dict[int, float]:
+        for ir_id in target_weights or {}:
+            self.register(ir_id)
 
-        rw_sum = sum(self.rarity_weights['Weights'])
         rarity_agg = defaultdict(float)
 
-        if target_weights:
-            self.itemset_node.register(list(target_weights.keys()))
+        rw_weights = self.rarity_weights["Weights"]
+        rw_sum = sum(self.allowed_rarities(gender_id).values())
 
-        for rarity_id, rw in zip(range(1, 5), self.rarity_weights['Weights']):
+        for rarity_id, rw in zip(range(1, 5), rw_weights):
             pool = self.itemset_node.drop_pool(
                 rarity_id=rarity_id,
                 gender_id=gender_id,
                 target_weights=(
                     None
                     if target_weights is None
-                    else
-                    {
+                    else {
                         ir_id: self.discount_explained_prob(ir_id, weight)
                         for ir_id, weight in target_weights.items()
                     }
@@ -342,6 +467,7 @@ class CrateNode:
         return rarity_agg
 
     def inject(self, ir_id: int, prob: float, agg: Callable = min) -> None:
+        self.register(ir_id)
         self.itemset_node.inject(
             ir_id=ir_id,
             prob=self.discount_explained_prob(ir_id, prob),
@@ -368,19 +494,21 @@ class CrateGroupNode:
         self.is_id = is_id
         self.agg = agg
 
-        self.cdc = knowledge_base.drops['CrateDropChances'][cdc_id]
-        self.cdt = knowledge_base.drops['CrateDropTypes'][cdt_id]
+        self.cdc = knowledge_base.drops["CrateDropChances"][cdc_id]
+        self.cdt = knowledge_base.drops["CrateDropTypes"][cdt_id]
 
         if is_id not in self.itemset_register:
             self.itemset_register[is_id] = ItemSetNode(knowledge_base, is_id)
         self.itemset_node = itemset_register[is_id]
 
-        for crate_id in self.cdt['CrateIDs']:
+        for crate_id in self.cdt["CrateIDs"]:
             if crate_id not in self.crate_register:
-                self.crate_register[crate_id] = CrateNode(knowledge_base, itemset_register, crate_id)
+                self.crate_register[crate_id] = CrateNode(
+                    knowledge_base, itemset_register, crate_id
+                )
         self.crate_nodes = {
             index: self.crate_register[crate_id]
-            for index, crate_id in enumerate(self.cdt['CrateIDs'])
+            for index, crate_id in enumerate(self.cdt["CrateIDs"])
             if self.is_id == self.crate_register[crate_id].itemset_node.is_id
         }
 
@@ -390,24 +518,39 @@ class CrateGroupNode:
         prob: float,
         ignore_any_crate_prob: bool = False,
     ) -> float:
-        any_crate_prob = self.cdc['DropChance'] / self.cdc['DropChanceTotal']
-        cdw = self.cdc['CrateTypeDropWeights']
+        any_crate_prob = self.cdc["DropChance"] / self.cdc["DropChanceTotal"]
+        cdw = self.cdc["CrateTypeDropWeights"]
         cdwt = sum(cdw)
 
         if len(cdw) < crate_index + 1 or cdw[crate_index] == 0:
-            return 0.0
-        return prob * cdwt / (cdw[crate_index] * (
-            1.0 if ignore_any_crate_prob else any_crate_prob
-        ))
+            discounted_prob = 0.0
+        else:
+            discounted_prob = (
+                prob
+                * cdwt
+                / (
+                    cdw[crate_index]
+                    * (1.0 if ignore_any_crate_prob else any_crate_prob)
+                )
+            )
+
+        logging.debug(
+            "Probability %s discounted to %s from crate group %s to crate %s",
+            prob,
+            discounted_prob,
+            (self.cdc_id, self.cdt_id, self.is_id),
+            self.cdt["CrateIDs"][crate_index],
+        )
+
+        return discounted_prob
 
     def drop_pool(
         self,
         gender_id: int,
         target_weights: Optional[Dict[int, float]] = None,
     ) -> Dict[int, float]:
-
-        any_crate_prob = self.cdc['DropChance'] / self.cdc['DropChanceTotal']
-        cdw = self.cdc['CrateTypeDropWeights']
+        any_crate_prob = self.cdc["DropChance"] / self.cdc["DropChanceTotal"]
+        cdw = self.cdc["CrateTypeDropWeights"]
         cdwt = sum(cdw)
         group_agg = defaultdict(float)
 
@@ -417,8 +560,7 @@ class CrateGroupNode:
                 target_weights=(
                     None
                     if target_weights is None
-                    else
-                    {
+                    else {
                         ir_id: self.discount_explained_prob(index, weight)
                         for ir_id, weight in target_weights.items()
                     }
@@ -433,9 +575,8 @@ class CrateGroupNode:
         self,
         ir_id: int,
         crate_target_probs: Dict[int, float],
-    ) -> List[Tuple['CrateGroupNode', int, float]]:
-
-        max_index = len(self.cdt['CrateIDs']) - 1
+    ) -> List[Tuple["CrateGroupNode", int, float]]:
+        max_index = len(self.cdt["CrateIDs"]) - 1
         fixed_crate_target_probs = {}
 
         for index, prob in sorted(crate_target_probs.items()):
@@ -453,12 +594,16 @@ class CrateGroupNode:
                 fixed_crate_target_probs[fixed_index] = prob
 
         # this may not work for rarity_id=0
-        item_freq = inv(self.agg([
-            weights[ir_id]
-            for gender_id in self.itemset_node.probs_to_change
-            for weights in [self.drop_pool(gender_id=gender_id)]
-            if ir_id in weights
-        ]))
+        item_freq = inv(
+            self.agg(
+                [
+                    weights[ir_id]
+                    for gender_id in self.itemset_node.probs_to_change
+                    for weights in [self.drop_pool(gender_id=gender_id)]
+                    if ir_id in weights
+                ]
+            )
+        )
 
         freq_groups = defaultdict(list)
         # stable sort strats
@@ -468,9 +613,11 @@ class CrateGroupNode:
             if index not in fixed_crate_target_probs:
                 continue
 
-            desired_freq = inv(crate_node.discount_explained_prob(
-                ir_id, fixed_crate_target_probs[index]
-            ))
+            desired_freq = inv(
+                crate_node.discount_explained_prob(
+                    ir_id, fixed_crate_target_probs[index]
+                )
+            )
 
             added = False
             for freq, freq_group in freq_groups.items():
@@ -499,13 +646,13 @@ class CrateGroupNode:
                 is_id = self.is_id
             else:
                 new_itemset = self.itemset_node.itemset.deepcopy()
-                is_id = self.knowledge_base.drops['ItemSets'].add(new_itemset)
+                is_id = self.knowledge_base.drops["ItemSets"].add(new_itemset)
 
             for index in freq_group:
-                crate_id = self.cdt['CrateIDs'][index]
-                crate = self.knowledge_base.drops['Crates'][crate_id]
+                crate_id = self.cdt["CrateIDs"][index]
+                crate = self.knowledge_base.drops["Crates"][crate_id]
                 # this should also fix the references
-                crate['ItemSetID'] = is_id
+                crate["ItemSetID"] = is_id
 
                 # force reload
                 self.crate_register[crate_id] = CrateNode(
@@ -514,7 +661,7 @@ class CrateGroupNode:
                     c_id=crate_id,
                 )
 
-            groups.append((is_id, freq_group[0], 1. / freq))
+            groups.append((is_id, freq_group[0], 1.0 / freq))
 
         # CrateGroupNode construction has to happen after ALL crate_register entries are changed
         return [
@@ -542,6 +689,7 @@ class CrateGroupNode:
         agg: Callable = min,
     ) -> None:
         for index, crate_node in self.crate_nodes.items():
+            # TODO: count satisfied % and distribute remaining
             crate_node.inject(
                 ir_id=ir_id,
                 prob=self.discount_explained_prob(
@@ -551,6 +699,42 @@ class CrateGroupNode:
                 ),
                 agg=agg,
             )
+
+
+class CrateSetNode:
+    def __init__(
+        self,
+        knowledge_base: KnowledgeBase,
+        itemset_register: Dict[int, ItemSetNode],
+        crate_register: Dict[int, CrateNode],
+        crate_group_register: Dict[Tuple[int, int, int], CrateGroupNode],
+        cdc_id: int,
+        cdt_id: int,
+        is_ids: Set[int],
+        agg: Callable = min,
+    ) -> None:
+        self.knowledge_base = knowledge_base
+        self.itemset_register = itemset_register
+        self.crate_register = crate_register
+        self.crate_group_register = crate_group_register
+        self.cdc_id = cdc_id
+        self.cdt_id = cdt_id
+        self.is_ids = is_ids
+        self.agg = agg
+
+        self.cdc = knowledge_base.drops["CrateDropChances"][cdc_id]
+        self.cdt = knowledge_base.drops["CrateDropTypes"][cdt_id]
+
+        for crate_id in self.cdt["CrateIDs"]:
+            if crate_id not in self.crate_register:
+                self.crate_register[crate_id] = CrateNode(
+                    knowledge_base, itemset_register, crate_id
+                )
+        self.crate_nodes = {
+            index: self.crate_register[crate_id]
+            for index, crate_id in enumerate(self.cdt["CrateIDs"])
+        }
+        # TODO: make this the top level object, move split logic here
 
 
 class ConfigKnowledgeBase:
@@ -567,8 +751,9 @@ class ConfigKnowledgeBase:
             self.get_ir_id(item_config): {
                 is_id
                 for map_name_is, is_id in references.get(
-                    ('ItemReferences', self.get_ir_id(item_config)), [])
-                if map_name_is == 'ItemSets'
+                    ("ItemReferences", self.get_ir_id(item_config)), []
+                )
+                if map_name_is == "ItemSets"
             }
             for item_config in item_configs
         }
@@ -582,18 +767,51 @@ class ConfigKnowledgeBase:
             ir_id: {
                 c_id
                 for is_id in is_ids
-
-                for map_name_c, c_id in references.get(('ItemSets', is_id), [])
-                if map_name_c == 'Crates'
+                for map_name_c, c_id in references.get(("ItemSets", is_id), [])
+                if map_name_c == "Crates"
             }
             for ir_id, is_ids in self.ir_is_ids.items()
         }
         self.crate_register = {
             c_id: CrateNode(knowledge_base, self.itemset_register, c_id)
             # pull them all, we need to recognize any and all crates
-            for c_id in knowledge_base.drops['Crates']
+            for c_id in knowledge_base.drops["Crates"]
         }
 
+        self.ir_triples = defaultdict(set)
+        self.triple_m_ids = defaultdict(set)
+        self.triple_e_ids = defaultdict(set)
+
+        for ir_id, c_ids in self.ir_c_ids.items():
+            for c_id in c_ids:
+                crate = knowledge_base.drops["Crates"][c_id]
+
+                for map_name_cdt, cdt_id in references.get(("Crates", c_id), []):
+                    if map_name_cdt != "CrateDropTypes":
+                        continue
+
+                    for map_name_md, md_id in references.get(
+                        ("CrateDropTypes", cdt_id), []
+                    ):
+                        if map_name_md != "MobDrops":
+                            continue
+
+                        mobdrop = knowledge_base.drops["MobDrops"][md_id]
+                        triple = (
+                            mobdrop["CrateDropChanceID"],
+                            mobdrop["CrateDropTypeID"],
+                            crate["ItemSetID"],
+                        )
+                        self.ir_triples[ir_id].add(triple)
+
+                        for map_name_me, me_id in references.get(
+                            ("MobDrops", md_id), []
+                        ):
+                            if map_name_me == "Mobs":
+                                self.triple_m_ids[triple].add(me_id)
+                            elif map_name_me == "Events":
+                                self.triple_e_ids[triple].add(me_id)
+        """
         self.ir_triples = {
             ir_id: {
                 (
@@ -614,6 +832,7 @@ class ConfigKnowledgeBase:
             }
             for ir_id, c_ids in self.ir_c_ids.items()
         }
+        """
         self.crate_group_register = {
             (cdc_id, cdt_id, is_id): CrateGroupNode(
                 knowledge_base=knowledge_base,
@@ -633,11 +852,13 @@ class ConfigKnowledgeBase:
         ir_id = self.knowledge_base.tuple_irid_map.get(item_tuple)
 
         if item_tuple not in self.knowledge_base.tuple_irid_map:
-            ir_id = self.knowledge_base.drops['ItemReferences'].add({
-                'ItemReferenceID': -1,
-                'ItemID': item_config.id,
-                'Type': item_config.type,
-            })
+            ir_id = self.knowledge_base.drops["ItemReferences"].add(
+                {
+                    "ItemReferenceID": -1,
+                    "ItemID": item_config.id,
+                    "Type": item_config.type,
+                }
+            )
             self.knowledge_base.tuple_irid_map[item_tuple] = ir_id
             self.knowledge_base.irid_tuple_map[ir_id] = item_tuple
 
@@ -651,8 +872,7 @@ def inject_freq_value(
     ignore_any_crate_prob: bool = False,
     agg: Callable = min,
 ) -> None:
-
-    prob = 1. / freq
+    prob = 1.0 / freq
     for triple in ckb.ir_triples[ir_id]:
         ckb.crate_group_register[triple].inject(
             ir_id=ir_id,
@@ -679,21 +899,21 @@ def inject_mob_event_freq_value(
             continue
 
         mob_event = ckb.knowledge_base.drops[map_name][mob_event_id]
-        mob_drop = ckb.knowledge_base.drops['MobDrops'][mob_event['MobDropID']]
+        mob_drop = ckb.knowledge_base.drops["MobDrops"][mob_event["MobDropID"]]
 
-        cdt_id = mob_drop['CrateDropTypeID']
-        cdt = ckb.knowledge_base.drops['CrateDropTypes'][cdt_id]
+        cdt_id = mob_drop["CrateDropTypeID"]
+        cdt = ckb.knowledge_base.drops["CrateDropTypes"][cdt_id]
         found_triples = set()
 
-        for crate_id in cdt['CrateIDs']:
-            crate = ckb.knowledge_base.drops['Crates'][crate_id]
-            triple = (mob_drop['CrateDropChanceID'], cdt_id, crate['ItemSetID'])
+        for crate_id in cdt["CrateIDs"]:
+            crate = ckb.knowledge_base.drops["Crates"][crate_id]
+            triple = (mob_drop["CrateDropChanceID"], cdt_id, crate["ItemSetID"])
 
             if triple in ckb.ir_triples[ir_id]:
                 found_triples.add(triple)
 
         for triple in found_triples:
-            value = 1. / freq
+            value = 1.0 / freq
 
             if triple in filtered_config:
                 old_value = filtered_config[triple]
@@ -716,7 +936,7 @@ def inject_mob_event_freq_value(
             unspecified_triplets.remove(triple)
 
     if OTHER_STANDARD_ID in freq_per_mob_event:
-        value = 1. / freq_per_mob_event[OTHER_STANDARD_ID]
+        value = 1.0 / freq_per_mob_event[OTHER_STANDARD_ID]
         for triple in unspecified_triplets:
             filtered_config[triple] = value
 
@@ -735,11 +955,10 @@ def inject_crate_type_freq_value(
     item_name: str,
     freq_per_crate_type: Dict[str, float],
     agg: Callable = min,
-    extra_id_str: str = '',
+    extra_id_str: str = "",
     allowed_triple: Optional[Tuple[int, int, int]] = None,
     other_crate_types: Optional[Set[str]] = None,
 ) -> None:
-
     crate_target_probs = {}
 
     for crate_type, freq in freq_per_crate_type.items():
@@ -747,7 +966,7 @@ def inject_crate_type_freq_value(
             continue
 
         crate_index = ckb.knowledge_base.crate_name_order_map[crate_type]
-        value = 1. / freq
+        value = 1.0 / freq
 
         if crate_index in crate_target_probs:
             old_value = crate_target_probs[crate_index]
@@ -769,14 +988,14 @@ def inject_crate_type_freq_value(
         crate_target_probs[crate_index] = next_value
 
     if OTHER_STANDARD_KEYWORD in freq_per_crate_type:
-        value = 1. / freq_per_crate_type[OTHER_STANDARD_KEYWORD]
+        value = 1.0 / freq_per_crate_type[OTHER_STANDARD_KEYWORD]
 
         other_crate_types = other_crate_types or {
             # do not add ETC crates by default
-            'Standard',
-            'Special',
-            'Sooper',
-            'Sooper Dooper',
+            "Standard",
+            "Special",
+            "Sooper",
+            "Sooper Dooper",
         }
 
         for crate_type in other_crate_types:
@@ -784,10 +1003,7 @@ def inject_crate_type_freq_value(
             crate_target_probs.setdefault(crate_index, value)
 
     found_triples = (
-        ckb.ir_triples[ir_id].copy()
-        if allowed_triple is None
-        else
-        {allowed_triple}
+        ckb.ir_triples[ir_id].copy() if allowed_triple is None else {allowed_triple}
     )
 
     for triple in found_triples:
@@ -798,8 +1014,7 @@ def inject_crate_type_freq_value(
         )
 
         cgr_update_dict = {
-            (cgn.cdc_id, cgn.cdt_id, cgn.is_id): cgn
-            for cgn, _, _ in cgn_probs
+            (cgn.cdc_id, cgn.cdt_id, cgn.is_id): cgn for cgn, _, _ in cgn_probs
         }
         ckb.crate_group_register.update(cgr_update_dict)
         ckb.ir_triples[ir_id].update(cgr_update_dict.keys())
@@ -821,16 +1036,16 @@ def inject_mob_and_crate_type_freq_value(
         if mob_id == OTHER_STANDARD_ID:
             continue
 
-        mob = ckb.knowledge_base.drops['Mobs'][mob_id]
-        mob_drop = ckb.knowledge_base.drops['MobDrops'][mob['MobDropID']]
+        mob = ckb.knowledge_base.drops["Mobs"][mob_id]
+        mob_drop = ckb.knowledge_base.drops["MobDrops"][mob["MobDropID"]]
 
-        cdt_id = mob_drop['CrateDropTypeID']
-        cdt = ckb.knowledge_base.drops['CrateDropTypes'][cdt_id]
+        cdt_id = mob_drop["CrateDropTypeID"]
+        cdt = ckb.knowledge_base.drops["CrateDropTypes"][cdt_id]
         found_triples = set()
 
-        for crate_id in cdt['CrateIDs']:
-            crate = ckb.knowledge_base.drops['Crates'][crate_id]
-            triple = (mob_drop['CrateDropChanceID'], cdt_id, crate['ItemSetID'])
+        for crate_id in cdt["CrateIDs"]:
+            crate = ckb.knowledge_base.drops["Crates"][crate_id]
+            triple = (mob_drop["CrateDropChanceID"], cdt_id, crate["ItemSetID"])
 
             if triple in ckb.ir_triples[ir_id]:
                 found_triples.add(triple)
@@ -842,7 +1057,7 @@ def inject_mob_and_crate_type_freq_value(
                 item_name=item_name,
                 freq_per_crate_type=freq_per_crate_type,
                 agg=agg,
-                extra_id_str=f'Mob {mob_id} ',
+                extra_id_str=f"Mob {mob_id} ",
                 allowed_triple=triple,
             )
 
@@ -856,7 +1071,7 @@ def inject_mob_and_crate_type_freq_value(
                 item_name=item_name,
                 freq_per_crate_type=freq_per_mob_and_crate_type[OTHER_STANDARD_ID],
                 agg=agg,
-                extra_id_str=f'Crate group {triple} ',
+                extra_id_str=f"Crate group {triple} ",
                 allowed_triple=triple,
             )
 
@@ -868,11 +1083,10 @@ def inject_racing_crate_type_freq_value(
     epid: int,
     agg: Callable = min,
 ) -> None:
-
-    racing = ckb.knowledge_base.drops['Racing'][epid]
+    racing = ckb.knowledge_base.drops["Racing"][epid]
     allowed_crate_types = {
         ckb.knowledge_base.crate_order_name_map[i]: crate_id
-        for i, crate_id in enumerate(reversed(racing['Rewards']))
+        for i, crate_id in enumerate(reversed(racing["Rewards"]))
         if crate_id > 0
     }
     unused_crate_types = set(allowed_crate_types.keys())
@@ -883,20 +1097,20 @@ def inject_racing_crate_type_freq_value(
 
         if crate_type not in allowed_crate_types:
             logging.warn(
-                'IZ %s %s CRATE type %s is not a valid reward, skipping ...',
+                "IZ %s %s CRATE type %s is not a valid reward, skipping ...",
                 epid,
-                racing['EPNAme'],
+                racing["EPNAme"],
                 crate_type,
             )
             continue
 
         crate_id = allowed_crate_types[crate_type]
-        prob = 1. / freq
+        prob = 1.0 / freq
         ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
         unused_crate_types.remove(crate_type)
 
     if OTHER_STANDARD_KEYWORD in freq_per_crate_type:
-        prob = 1. / freq_per_crate_type[OTHER_STANDARD_KEYWORD]
+        prob = 1.0 / freq_per_crate_type[OTHER_STANDARD_KEYWORD]
 
         for crate_type in unused_crate_types:
             crate_id = allowed_crate_types[crate_type]
@@ -909,7 +1123,6 @@ def inject_racing_freq_value(
     freq_per_iz_and_crate: Dict[int, Dict[str, float]],
     agg: Callable = min,
 ) -> None:
-
     unused_izs = set(ckb.knowledge_base.iz_name_id_map.values())
 
     for epid, freq_per_crate_type in freq_per_iz_and_crate.items():
@@ -944,11 +1157,10 @@ def inject_mission_freq_values(
     freq_per_mission_level: Dict[int, float],
     agg: Callable = min,
 ) -> None:
-
     unused_levels = set(ckb.knowledge_base.mission_level_crate_id_map.keys())
 
     for level, freq in freq_per_mission_level.items():
-        prob = 1. / freq
+        prob = 1.0 / freq
 
         for crate_id in ckb.knowledge_base.mission_level_crate_id_map[level]:
             ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
@@ -956,7 +1168,7 @@ def inject_mission_freq_values(
         unused_levels.remove(level)
 
     if OTHER_STANDARD_ID in freq_per_mission_level:
-        prob = 1. / freq_per_mission_level[OTHER_STANDARD_ID]
+        prob = 1.0 / freq_per_mission_level[OTHER_STANDARD_ID]
 
         for level in unused_levels:
             for crate_id in ckb.knowledge_base.mission_level_crate_id_map[level]:
@@ -970,7 +1182,6 @@ def inject_egger_crate_type_freq_value(
     zone: str,
     agg: Callable = min,
 ) -> None:
-
     mystery_egg_crates = ckb.knowledge_base.zone_to_mystery_egger_map[zone]
     unused_crate_types = set(mystery_egg_crates.keys())
 
@@ -980,19 +1191,19 @@ def inject_egger_crate_type_freq_value(
 
         if crate_type not in mystery_egg_crates:
             logging.warn(
-                'Zone %s EGGER has no CRATE type %s, skipping ...',
+                "Zone %s EGGER has no CRATE type %s, skipping ...",
                 zone,
                 crate_type,
             )
             continue
 
         crate_id = mystery_egg_crates[crate_type]
-        prob = 1. / freq
+        prob = 1.0 / freq
         ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
         unused_crate_types.remove(crate_type)
 
     if OTHER_STANDARD_KEYWORD in freq_per_crate_type:
-        prob = 1. / freq_per_crate_type[OTHER_STANDARD_KEYWORD]
+        prob = 1.0 / freq_per_crate_type[OTHER_STANDARD_KEYWORD]
 
         for crate_type in unused_crate_types:
             crate_id = mystery_egg_crates[crate_id]
@@ -1005,7 +1216,6 @@ def inject_egger_freq_values(
     freq_per_zone_and_crate_type: Dict[str, Dict[str, float]],
     agg: Callable = min,
 ) -> None:
-
     unused_zones = set(ckb.knowledge_base.zone_to_egger_map.keys())
 
     for zone, freq_per_crate_type in freq_per_zone_and_crate_type.items():
@@ -1040,7 +1250,6 @@ def inject_golden_egg_freq_values(
     freq_per_area: Dict[str, float],
     agg: Callable = min,
 ) -> None:
-
     filtered_config = {}
     unused_areas = set(ckb.knowledge_base.area_eggs.keys())
 
@@ -1048,7 +1257,7 @@ def inject_golden_egg_freq_values(
         if area == OTHER_STANDARD_KEYWORD:
             continue
 
-        value = 1. / freq
+        value = 1.0 / freq
 
         for crate_id in ckb.knowledge_base.area_eggs[area]:
             if crate_id in filtered_config:
@@ -1072,7 +1281,7 @@ def inject_golden_egg_freq_values(
         unused_areas.remove(area)
 
     if OTHER_STANDARD_KEYWORD in freq_per_area:
-        value = 1. / freq_per_area[OTHER_STANDARD_KEYWORD]
+        value = 1.0 / freq_per_area[OTHER_STANDARD_KEYWORD]
         for area in unused_areas:
             filtered_config[crate_id] = value
 
@@ -1086,9 +1295,8 @@ def inject_named_crate_freq_values(
     freq_per_crate_id: Dict[int, float],
     agg: Callable = min,
 ) -> None:
-
     for crate_id, freq in freq_per_crate_id.items():
-        prob = 1. / freq
+        prob = 1.0 / freq
         ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
 
 
@@ -1097,9 +1305,8 @@ def alter_chances(
     item_configs: Optional[List[ItemConfig]],
     agg: Callable = min,
 ) -> None:
-
     if not item_configs:
-        logging.warn('No valid item configs found, skipping the calculation step...')
+        logging.warn("No valid item configs found, skipping the calculation step...")
         return
 
     ckb = ConfigKnowledgeBase(knowledge_base, item_configs, agg=agg)
@@ -1121,7 +1328,7 @@ def alter_chances(
                 ckb=ckb,
                 ir_id=ir_id,
                 item_name=item_config.name,
-                map_name='Mobs',
+                map_name="Mobs",
                 freq_per_mob_event=item_config.kills_till_item_per_mob,
                 ignore_any_crate_prob=False,
                 agg=agg,
@@ -1141,7 +1348,7 @@ def alter_chances(
                 ckb=ckb,
                 ir_id=ir_id,
                 item_name=item_config.name,
-                map_name='Mobs',
+                map_name="Mobs",
                 freq_per_mob_event=item_config.crates_till_item_per_mob,
                 ignore_any_crate_prob=True,
                 agg=agg,
@@ -1163,7 +1370,10 @@ def alter_chances(
             item_config.crates_till_item_per_mob_and_crate_type or {}
         )
 
-        for crate_type, crates_till_item_per_mob in crates_till_item_per_crate_type_and_mob.items():
+        for (
+            crate_type,
+            crates_till_item_per_mob,
+        ) in crates_till_item_per_crate_type_and_mob.items():
             for mob_id, num_crates in crates_till_item_per_mob.items():
                 if mob_id not in crates_till_item_per_mob_and_crate_type:
                     crates_till_item_per_mob_and_crate_type[mob_id] = {}
@@ -1184,7 +1394,7 @@ def alter_chances(
                 ckb=ckb,
                 ir_id=ir_id,
                 item_name=item_config.name,
-                map_name='Events',
+                map_name="Events",
                 freq_per_mob_event=item_config.event_kills_till_item,
                 ignore_any_crate_prob=False,
                 agg=agg,
@@ -1195,7 +1405,7 @@ def alter_chances(
                 ckb=ckb,
                 ir_id=ir_id,
                 item_name=item_config.name,
-                map_name='Events',
+                map_name="Events",
                 freq_per_mob_event=item_config.event_crates_till_item,
                 ignore_any_crate_prob=True,
                 agg=agg,
@@ -1241,12 +1451,139 @@ def alter_chances(
                 agg=agg,
             )
 
-    success = True
     for itemset_node in ckb.itemset_register.values():
-        try:
-            itemset_node.alter_drops_values(agg=agg)
-        except ValueError:
-            success = False
+        itemset_node.alter_drops_values(agg=agg)
 
-    if not success:
-        logging.error('One or more problems occurred with your configuration!')
+    log_output_freqs(knowledge_base, item_configs, agg=agg)
+
+
+def log_output_freqs(
+    knowledge_base: KnowledgeBase,
+    item_configs: Optional[List[ItemConfig]],
+    agg: Callable = min,
+) -> None:
+    pass
+
+    if not item_configs:
+        logging.warn("No valid item configs found, skipping the calculation step...")
+        return
+
+    ckb = ConfigKnowledgeBase(knowledge_base, item_configs, agg=agg)
+
+    all_crates = defaultdict(set)
+    all_triples = defaultdict(set)
+
+    for c_id_set in ckb.ir_c_ids.values():
+        for c_id in c_id_set:
+            is_id = knowledge_base.drops["Crates"][c_id]["ItemSetID"]
+            all_crates[is_id].add(c_id)
+
+    for triple_set in ckb.ir_triples.values():
+        for cdc_id, cdt_id, is_id in triple_set:
+            all_triples[(cdc_id, cdt_id)].add(is_id)
+
+    for (cdc_id, cdt_id), is_ids in all_triples.items():
+        all_prob_info = {
+            "Boys": {},
+            "Girls": {},
+        }
+        desc_text = ""
+
+        for is_id in is_ids:
+            triple = (cdc_id, cdt_id, is_id)
+            mob_ids = ckb.triple_m_ids.get(triple) or set()
+            event_ids = ckb.triple_e_ids.get(triple) or set()
+
+            if not mob_ids and not event_ids:
+                continue
+
+            mob_text = ", ".join(
+                f"mob {ckb.knowledge_base.npc_map[mob_id]['m_strName']} ({mob_id})"
+                for mob_id in mob_ids
+            )
+            event_text = ", ".join(
+                f"event {ckb.knowledge_base.event_id_name_map[event_id]} ({event_id})"
+                for event_id in event_ids
+            )
+            desc_text = " and ".join(s for s in [mob_text, event_text] if s)
+
+            for i, gender_name in enumerate(all_prob_info.keys()):
+                cgn = ckb.crate_group_register[triple]
+                any_crate_prob = cgn.cdc["DropChance"] / cgn.cdc["DropChanceTotal"]
+
+                for index, c_id in enumerate(cgn.cdt["CrateIDs"]):
+                    is_id = knowledge_base.drops["Crates"][c_id]["ItemSetID"]
+                    if index in cgn.crate_nodes and is_id in all_crates:
+                        del all_crates[is_id]
+
+                for ir_id, prob in cgn.drop_pool(gender_id=(i + 1)).items():
+                    item_tuple = ckb.knowledge_base.irid_tuple_map[ir_id]
+                    item_info = ckb.knowledge_base.item_map[item_tuple]
+                    item_str = f"{item_info['m_strName'].strip()} {item_tuple}"
+
+                    current_prob = (
+                        prob
+                        + all_prob_info[gender_name].get(
+                            item_str, {"Probability": 0.0}
+                        )["Probability"]
+                    )
+                    freq = inv(current_prob)
+                    freq_crates = freq * any_crate_prob
+
+                    all_prob_info[gender_name][item_str] = {
+                        "Probability": current_prob,
+                        "Kills to Item": round(freq, 2),
+                        "Crates to Item": round(freq_crates, 2),
+                    }
+
+        logging.info(
+            "Final values for %s: %s\nBS: %s GS: %s",
+            desc_text,
+            json.dumps(all_prob_info, indent=4),
+            sum(prob["Probability"] for prob in all_prob_info["Boys"].values()),
+            sum(prob["Probability"] for prob in all_prob_info["Girls"].values()),
+        )
+
+    for is_id, c_ids in all_crates.items():
+        all_prob_info = {
+            "Boys": {},
+            "Girls": {},
+        }
+        desc_text = ""
+
+        for c_id in c_ids:
+            crate_node = ckb.crate_register[c_id]
+            crate_info = ckb.knowledge_base.item_map[(9, c_id)]
+            desc_text = "{} {} (CRATE {})".format(
+                crate_info["m_strName"].strip(),
+                crate_info["m_strComment"].strip()[:20],
+                c_ids,
+            )
+
+            for gender_id, gender_name in {1: "Boys", 2: "Girls"}.items():
+                all_prob_info[gender_name] = {}
+                for ir_id, prob in crate_node.drop_pool(gender_id=gender_id).items():
+                    item_tuple = ckb.knowledge_base.irid_tuple_map[ir_id]
+                    item_info = ckb.knowledge_base.item_map[item_tuple]
+                    item_str = f"{item_info['m_strName'].strip()} {item_tuple}"
+
+                    current_prob = (
+                        prob
+                        + all_prob_info[gender_name].get(
+                            item_str, {"Probability": 0.0}
+                        )["Probability"]
+                    )
+                    freq = inv(current_prob)
+
+                    all_prob_info[gender_name][item_str] = {
+                        "Probability": current_prob,
+                        "Number of this type of CRATE to Item": round(freq, 2),
+                    }
+
+        logging.info(
+            "Final values for %s: %s\nBS: %s GS: %s",
+            desc_text,
+            json.dumps(all_prob_info, indent=4),
+            sum(prob["Probability"] for prob in all_prob_info["Boys"].values()),
+            sum(prob["Probability"] for prob in all_prob_info["Girls"].values()),
+        )

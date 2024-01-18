@@ -7,57 +7,57 @@ from typing import Any, Dict, DefaultDict, List, Iterator, Iterable, Set, Tuple,
 
 
 int_key_map = {
-    'Racing': 'EPID',
-    'NanoCapsules': 'Nano',
-    'CodeItems': 'Code',
+    "Racing": "EPID",
+    "NanoCapsules": "Nano",
+    "CodeItems": "Code",
 }
 
 int_lower_bound_map = {
-    'Crates': 0,
+    "Crates": 0,
 }
 
 fk_map_names = {
-    'Rewards': 'Crates',
+    "Rewards": "Crates",
 }
 
 foreign_key_map = {
-    'CrateDropTypes': [
-        'CrateIDs',
+    "CrateDropTypes": [
+        "CrateIDs",
     ],
-    'MobDrops': [
-        'CrateDropChanceID',
-        'CrateDropTypeID',
-        'MiscDropChanceID',
-        'MiscDropTypeID',
+    "MobDrops": [
+        "CrateDropChanceID",
+        "CrateDropTypeID",
+        "MiscDropChanceID",
+        "MiscDropTypeID",
     ],
-    'Events': [
-        'MobDropID',
+    "Events": [
+        "MobDropID",
     ],
-    'Mobs': [
-        'MobDropID',
+    "Mobs": [
+        "MobDropID",
     ],
-    'ItemSets': [
-        'ItemReferenceIDs',
+    "ItemSets": [
+        "ItemReferenceIDs",
     ],
-    'Crates': [
-        'ItemSetID',
-        'RarityWeightID',
+    "Crates": [
+        "ItemSetID",
+        "RarityWeightID",
     ],
-    'Racing': [
-        'Rewards',
+    "Racing": [
+        "Rewards",
     ],
-    'NanoCapsules': [
-        'CrateID',
+    "NanoCapsules": [
+        "CrateID",
     ],
-    'CodeItems': [
-        'ItemReferenceIDs',
+    "CodeItems": [
+        "ItemReferenceIDs",
     ],
 }
 
 
 def patch(base_obj: Dict[str, Any], patch_obj: Dict[str, Any]) -> None:
     for key, value in patch_obj.items():
-        if key[0] == '!':
+        if key[0] == "!":
             base_obj[key[1:]] = value
             continue
 
@@ -105,7 +105,7 @@ def generate_patch(
                 if target_val:
                     target_obj[key] = target_val
             elif base_val != updated_val:
-                target_obj['!' + key] = updated_val
+                target_obj["!" + key] = updated_val
 
         elif key in base_obj:
             target_obj[key] = None
@@ -118,7 +118,7 @@ def generate_patch(
 class Data(dict):
     def __init__(
         self,
-        alt_dict: 'AlternateDict',
+        alt_dict: "AlternateDict",
         str_key: str,
         fk_names: List[str],
         value: Dict[str, Any],
@@ -147,32 +147,40 @@ class Data(dict):
     def __setitem__(self, key: str, value: Any) -> None:
         if key in self.fk_names:
             self_tuple = (self.main_key, self.int_key)
-            related_key = fk_map_names.get(key, key.split('ID')[0] + 's')
+            related_key = fk_map_names.get(key, key.split("ID")[0] + "s")
             related_value = self[key]
 
-            related_values = [related_value] if isinstance(related_value, int) else related_value
+            related_values = (
+                [related_value] if isinstance(related_value, int) else related_value
+            )
             altered_values = [value] if isinstance(related_value, int) else value
 
-            for related_value, altered_value in zip(related_values, altered_values):
-                if related_value != altered_value:
-                    self.references[(related_key, related_value)].remove(self_tuple)
-                    self.references[(related_key, altered_value)].add(self_tuple)
+            for related_value in related_values:
+                other_tuple = (related_key, related_value)
+                if (
+                    other_tuple in self.references
+                    and self_tuple in self.references[other_tuple]
+                ):
+                    self.references[other_tuple].remove(self_tuple)
+
+            for altered_value in altered_values:
+                self.references[(related_key, altered_value)].add(self_tuple)
 
         super().__setitem__(key, value)
 
     def __delitem__(self, key: Tuple[str, int]) -> None:
         if isinstance(key, str):
-            raise ValueError('Cannot delete entire field for a Data object!')
+            raise ValueError("Cannot delete entire field for a Data object!")
 
         field_key, related_value = key
         if field_key in self.fk_names:
             self_tuple = (self.main_key, self.int_key)
-            related_key = fk_map_names.get(key, key.split('ID')[0] + 's')
+            related_key = fk_map_names.get(key, key.split("ID")[0] + "s")
             self.references[(related_key, related_value)].remove(self_tuple)
 
         self[field_key].remove(related_value)
 
-    def deepcopy(self) -> 'Data':
+    def deepcopy(self) -> "Data":
         return Data(
             alt_dict=self.alt_dict,
             str_key=self.str_key,
@@ -184,7 +192,7 @@ class Data(dict):
 class AlternateDict(dict):
     def __init__(
         self,
-        drops: 'Drops',
+        drops: "Drops",
         main_key: str,
         main_obj: Dict[str, Dict[str, Any]],
     ) -> None:
@@ -192,22 +200,22 @@ class AlternateDict(dict):
         self.main_key = main_key
 
         self.lowest_id = int_lower_bound_map.get(self.main_key, -1)
-        self.int_key_name = int_key_map.get(self.main_key,
-                                            self.main_key[:-1] + 'ID')
+        self.int_key_name = int_key_map.get(self.main_key, self.main_key[:-1] + "ID")
 
-        super().__init__({
-            str_key: Data(
-                alt_dict=self,
-                str_key=str_key,
-                fk_names=foreign_key_map.get(self.main_key, []),
-                value=value,
-            )
-            for str_key, value in main_obj.items()
-        })
+        super().__init__(
+            {
+                str_key: Data(
+                    alt_dict=self,
+                    str_key=str_key,
+                    fk_names=foreign_key_map.get(self.main_key, []),
+                    value=value,
+                )
+                for str_key, value in main_obj.items()
+            }
+        )
 
         self.int_to_str_keys = {
-            value[self.int_key_name]: str_key
-            for str_key, value in main_obj.items()
+            value[self.int_key_name]: str_key for str_key, value in main_obj.items()
         }
 
     def __getitem__(self, key: int) -> Dict[str, Any]:
@@ -248,11 +256,14 @@ class AlternateDict(dict):
         return zip(self.ikeys(), self.values())
 
     def next_int_id(self) -> int:
-        return reduce(
-            max,
-            map(itemgetter(self.int_key_name), self.values()),
-            self.lowest_id,
-        ) + 1
+        return (
+            reduce(
+                max,
+                map(itemgetter(self.int_key_name), self.values()),
+                self.lowest_id,
+            )
+            + 1
+        )
 
     def next_str_id(self) -> str:
         return str(reduce(max, map(int, self.keys()), -1) + 1)
@@ -264,12 +275,16 @@ class AlternateDict(dict):
 
 class Drops(dict):
     def __init__(self, drops_path: Path, patch_paths: List[Path]) -> None:
-        super().__init__({
-            key: AlternateDict(self, key, obj)
-            for key, obj in get_patched(drops_path, patch_paths).items()
-        })
+        super().__init__(
+            {
+                key: AlternateDict(self, key, obj)
+                for key, obj in get_patched(drops_path, patch_paths).items()
+            }
+        )
 
-        self.references: DefaultDict[Tuple[str, int], Set[Tuple[str, int]]] = defaultdict(set)
+        self.references: DefaultDict[
+            Tuple[str, int], Set[Tuple[str, int]]
+        ] = defaultdict(set)
         for alt_dict in self.values():
             for int_key, data in alt_dict.iitems():
                 for fk_type in data.fk_names:
@@ -283,10 +298,16 @@ class Drops(dict):
                         if fk_id <= alt_dict.lowest_id:
                             continue
 
-                        fk_main_key = fk_map_names.get(fk_type, fk_type.split('ID')[0] + 's')
-                        self.references[(fk_main_key, fk_id)].add((data.main_key, int_key))
+                        fk_main_key = fk_map_names.get(
+                            fk_type, fk_type.split("ID")[0] + "s"
+                        )
+                        self.references[(fk_main_key, fk_id)].add(
+                            (data.main_key, int_key)
+                        )
 
-    def __getitem__(self, key: Union[str, Tuple[str, int]]) -> Union[AlternateDict, Data]:
+    def __getitem__(
+        self, key: Union[str, Tuple[str, int]]
+    ) -> Union[AlternateDict, Data]:
         if isinstance(key, tuple):
             return self[key[0]][key[1]]
         return super().__getitem__(key)

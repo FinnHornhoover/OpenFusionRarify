@@ -30,16 +30,17 @@ def load_data(
         config_data = yaml.safe_load(r)
 
     config = Config(
-        base=Path(config_data['base']),
-        patches=[Path(patch_path) for patch_path in (config_data.get('patches') or [])],
-        xdt=Path(config_data['xdt']),
-        output=Path(config_data['output']),
-        generate_patch=bool(config_data['generate-patch']),
+        base=Path(config_data["base"]),
+        patches=[Path(patch_path) for patch_path in (config_data.get("patches") or [])],
+        xdt=Path(config_data["xdt"]),
+        output=Path(config_data["output"]),
+        generate_patch=bool(config_data["generate-patch"]),
     )
 
     knowledge_base = KnowledgeBase(config)
-    item_configs = [ItemConfig.from_dict(knowledge_base, data)
-                    for data in config_data['items']]
+    item_configs = [
+        ItemConfig.from_dict(knowledge_base, data) for data in config_data["items"]
+    ]
 
     return knowledge_base, config, item_configs
 
@@ -59,15 +60,13 @@ def save_new_drops(knowledge_base: KnowledgeBase, config: Config) -> None:
     """
     object_to_save = (
         generate_patch(knowledge_base.base_drops, knowledge_base.drops)
-        if config.generate_patch else
-        knowledge_base.drops
+        if config.generate_patch
+        else knowledge_base.drops
     )
     path_to_save = (
-        config.output / 'new_patch'
-        if config.generate_patch else
-        config.output
+        config.output / "new_patch" if config.generate_patch else config.output
     )
 
     path_to_save.mkdir(parents=True, exist_ok=True)
-    with open(path_to_save / 'drops.json', 'w') as w:
+    with open(path_to_save / "drops.json", "w") as w:
         json.dump(object_to_save, w, indent=4)

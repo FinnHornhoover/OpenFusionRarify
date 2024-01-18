@@ -79,14 +79,14 @@ items:
     # approximately how many crates of certain crate types from certain infected zones get you the item
     race-crates-till-item:
       20:
-        Gold: 12
+        Gold: 120
       Green Gullet:
-        Gold: 12
+        Gold: 120
 
     # approximately how many mission crates of certain levels get you the item
     mission-crates-till-item:
       # all mission crates of a certain level are assumed to be identical
-      36: 1000
+      36: 12000
 
     # approximately how many egger eggs from certain areas get you the item
     egger-eggs-till-item:
@@ -112,9 +112,9 @@ items:
   # let's add an example for another item in a separate drop list
   - name: Hot Pants Ray Gun
     crates-till-item-per-crate-type:
-      Silver: 50
-      Gold: 10
+      Silver: 500
+      Gold: 100
   # follow a similar example for your items, watch the spaces and make sure your text is aligned
   - type: 0
     id: 3
-    kills-till-item: 30
+    kills-till-item: 300
