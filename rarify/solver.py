@@ -9,7 +9,7 @@ from .drops import Data
 from .knowledge_base import KnowledgeBase
 from .config import ItemConfig, OTHER_STANDARD_ID, OTHER_STANDARD_KEYWORD
 
-ABS_TOL = 0.01
+REL_TOL = 0.0001
 
 
 def inv(a: float) -> float:
@@ -192,7 +192,9 @@ class ItemSetNode:
             cur_sum = sum(current_values.values())
 
             if all(
-                abs_diff(cur_sum * inv(value), inv(prob_dict[ir_id])) < ABS_TOL
+                abs_diff(cur_sum * inv(value), inv(prob_dict[ir_id]))
+                / inv(prob_dict[ir_id])
+                < REL_TOL
                 for ir_id, value in current_values.items()
             ):
                 left = search(prob_dict, lo, mi - 1)
@@ -621,7 +623,7 @@ class CrateGroupNode:
 
             added = False
             for freq, freq_group in freq_groups.items():
-                if abs_diff(freq, desired_freq) < ABS_TOL:
+                if abs_diff(freq, desired_freq) / freq < REL_TOL:
                     freq_group.append(index)
                     added = True
                     break
@@ -1514,7 +1516,7 @@ def log_output_freqs(
             desc_text = "{} {} (CRATE {})".format(
                 crate_info["m_strName"].strip(),
                 crate_info["m_strComment"].strip()[:20],
-                ', '.join(map(str, sorted(c_ids))),
+                ", ".join(map(str, sorted(c_ids))),
             )
 
             for gender_id, gender_name in {1: "Boys", 2: "Girls"}.items():
