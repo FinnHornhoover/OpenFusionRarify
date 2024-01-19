@@ -701,42 +701,6 @@ class CrateGroupNode:
             )
 
 
-class CrateSetNode:
-    def __init__(
-        self,
-        knowledge_base: KnowledgeBase,
-        itemset_register: Dict[int, ItemSetNode],
-        crate_register: Dict[int, CrateNode],
-        crate_group_register: Dict[Tuple[int, int, int], CrateGroupNode],
-        cdc_id: int,
-        cdt_id: int,
-        is_ids: Set[int],
-        agg: Callable = min,
-    ) -> None:
-        self.knowledge_base = knowledge_base
-        self.itemset_register = itemset_register
-        self.crate_register = crate_register
-        self.crate_group_register = crate_group_register
-        self.cdc_id = cdc_id
-        self.cdt_id = cdt_id
-        self.is_ids = is_ids
-        self.agg = agg
-
-        self.cdc = knowledge_base.drops["CrateDropChances"][cdc_id]
-        self.cdt = knowledge_base.drops["CrateDropTypes"][cdt_id]
-
-        for crate_id in self.cdt["CrateIDs"]:
-            if crate_id not in self.crate_register:
-                self.crate_register[crate_id] = CrateNode(
-                    knowledge_base, itemset_register, crate_id
-                )
-        self.crate_nodes = {
-            index: self.crate_register[crate_id]
-            for index, crate_id in enumerate(self.cdt["CrateIDs"])
-        }
-        # TODO: make this the top level object, move split logic here
-
-
 class ConfigKnowledgeBase:
     def __init__(
         self,
@@ -779,8 +743,8 @@ class ConfigKnowledgeBase:
         }
 
         self.ir_triples = defaultdict(set)
-        self.triple_m_ids = defaultdict(set)
-        self.triple_e_ids = defaultdict(set)
+        self.crate_drop_m_ids = defaultdict(set)
+        self.crate_drop_e_ids = defaultdict(set)
 
         for ir_id, c_ids in self.ir_c_ids.items():
             for c_id in c_ids:
@@ -797,42 +761,21 @@ class ConfigKnowledgeBase:
                             continue
 
                         mobdrop = knowledge_base.drops["MobDrops"][md_id]
-                        triple = (
+                        tpl = (
                             mobdrop["CrateDropChanceID"],
                             mobdrop["CrateDropTypeID"],
-                            crate["ItemSetID"],
                         )
+                        triple = (*tpl, crate["ItemSetID"])
                         self.ir_triples[ir_id].add(triple)
 
                         for map_name_me, me_id in references.get(
                             ("MobDrops", md_id), []
                         ):
                             if map_name_me == "Mobs":
-                                self.triple_m_ids[triple].add(me_id)
+                                self.crate_drop_m_ids[tpl].add(me_id)
                             elif map_name_me == "Events":
-                                self.triple_e_ids[triple].add(me_id)
-        """
-        self.ir_triples = {
-            ir_id: {
-                (
-                    mobdrop['CrateDropChanceID'],
-                    mobdrop['CrateDropTypeID'],
-                    crate['ItemSetID']
-                )
-                for c_id in c_ids
-                for crate in [knowledge_base.drops['Crates'][c_id]]
+                                self.crate_drop_e_ids[tpl].add(me_id)
 
-                for map_name_cdt, cdt_id in references.get(('Crates', c_id), [])
-                if map_name_cdt == 'CrateDropTypes'
-
-                for map_name_md, md_id in references.get(('CrateDropTypes', cdt_id), [])
-                if map_name_md == 'MobDrops'
-
-                for mobdrop in [knowledge_base.drops['MobDrops'][md_id]]
-            }
-            for ir_id, c_ids in self.ir_c_ids.items()
-        }
-        """
         self.crate_group_register = {
             (cdc_id, cdt_id, is_id): CrateGroupNode(
                 knowledge_base=knowledge_base,
@@ -1479,8 +1422,10 @@ def log_output_freqs(
             all_crates[is_id].add(c_id)
 
     for triple_set in ckb.ir_triples.values():
-        for cdc_id, cdt_id, is_id in triple_set:
-            all_triples[(cdc_id, cdt_id)].add(is_id)
+        for cdc_id, cdt_id, _ in triple_set:
+            for crate_id in knowledge_base.drops["CrateDropTypes"][cdt_id]["CrateIDs"]:
+                is_id = knowledge_base.drops["Crates"][crate_id]["ItemSetID"]
+                all_triples[(cdc_id, cdt_id)].add(is_id)
 
     for (cdc_id, cdt_id), is_ids in all_triples.items():
         all_prob_info = {
@@ -1490,9 +1435,10 @@ def log_output_freqs(
         desc_text = ""
 
         for is_id in is_ids:
-            triple = (cdc_id, cdt_id, is_id)
-            mob_ids = ckb.triple_m_ids.get(triple) or set()
-            event_ids = ckb.triple_e_ids.get(triple) or set()
+            tpl = (cdc_id, cdt_id)
+            triple = (*tpl, is_id)
+            mob_ids = ckb.crate_drop_m_ids.get(tpl, set())
+            event_ids = ckb.crate_drop_e_ids.get(tpl, set())
 
             if not mob_ids and not event_ids:
                 continue
@@ -1508,6 +1454,17 @@ def log_output_freqs(
             desc_text = " and ".join(s for s in [mob_text, event_text] if s)
 
             for i, gender_name in enumerate(all_prob_info.keys()):
+                if triple not in ckb.crate_group_register:
+                    ckb.crate_group_register[triple] = CrateGroupNode(
+                        knowledge_base=knowledge_base,
+                        itemset_register=ckb.itemset_register,
+                        crate_register=ckb.crate_register,
+                        cdc_id=cdc_id,
+                        cdt_id=cdt_id,
+                        is_id=is_id,
+                        agg=agg,
+                    )
+
                 cgn = ckb.crate_group_register[triple]
                 any_crate_prob = cgn.cdc["DropChance"] / cgn.cdc["DropChanceTotal"]
 
@@ -1557,7 +1514,7 @@ def log_output_freqs(
             desc_text = "{} {} (CRATE {})".format(
                 crate_info["m_strName"].strip(),
                 crate_info["m_strComment"].strip()[:20],
-                c_ids,
+                ', '.join(map(str, sorted(c_ids))),
             )
 
             for gender_id, gender_name in {1: "Boys", 2: "Girls"}.items():
