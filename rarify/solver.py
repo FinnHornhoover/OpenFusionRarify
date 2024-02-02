@@ -1579,12 +1579,11 @@ def alter_chances(
     for itemset_node in ckb.itemset_register.values():
         itemset_node.alter_drops_values()
 
-    log_output_freqs(knowledge_base, config, item_configs)
+    log_output_freqs(ckb, item_configs)
 
 
 def log_output_freqs(
-    knowledge_base: KnowledgeBase,
-    config: Config,
+    prev_ckb: ConfigKnowledgeBase,
     item_configs: Optional[List[ItemConfig]],
 ) -> None:
     if not item_configs:
@@ -1592,25 +1591,35 @@ def log_output_freqs(
         return
 
     ckb = ConfigKnowledgeBase(
-        knowledge_base=knowledge_base,
+        knowledge_base=prev_ckb.knowledge_base,
         item_configs=item_configs,
-        agg=(min if config.blend_using_lowest_chance else max),
-        rel_tol=config.rel_tol,
+        agg=prev_ckb.agg,
+        rel_tol=prev_ckb.rel_tol,
     )
 
+    old_itemsets = prev_ckb.knowledge_base.base_drops["ItemSets"]
+    new_itemsets = ckb.knowledge_base.drops["ItemSets"]
+
+    all_itemsets = {
+        is_id
+        for is_id, itemset in new_itemsets.iitems()
+        if is_id not in old_itemsets or old_itemsets[is_id] != itemset
+    }
     all_crates = defaultdict(set)
     all_tuples = set()
 
     for c_id_set in ckb.ir_c_ids.values():
         for c_id in c_id_set:
-            is_id = knowledge_base.drops["Crates"][c_id]["ItemSetID"]
-            all_crates[is_id].add(c_id)
+            is_id = ckb.knowledge_base.drops["Crates"][c_id]["ItemSetID"]
+            if is_id in all_itemsets:
+                all_crates[is_id].add(c_id)
 
     for tpls in ckb.ir_tuples.values():
         for cdc_id, cdt_id in tpls:
-            for crate_id in knowledge_base.drops["CrateDropTypes"][cdt_id]["CrateIDs"]:
-                is_id = knowledge_base.drops["Crates"][crate_id]["ItemSetID"]
-                all_tuples.add((cdc_id, cdt_id))
+            for crate_id in ckb.knowledge_base.drops["CrateDropTypes"][cdt_id]["CrateIDs"]:
+                is_id = ckb.knowledge_base.drops["Crates"][crate_id]["ItemSetID"]
+                if is_id in all_itemsets:
+                    all_tuples.add((cdc_id, cdt_id))
 
     for tpl in all_tuples:
         all_prob_info = {
@@ -1625,11 +1634,11 @@ def log_output_freqs(
 
         mob_text = ", ".join(
             f"mob {ckb.knowledge_base.npc_map[mob_id]['m_strName']} ({mob_id})"
-            for mob_id in mob_ids
+            for mob_id in sorted(mob_ids)
         )
         event_text = ", ".join(
             f"event {ckb.knowledge_base.event_id_name_map[event_id]} ({event_id})"
-            for event_id in event_ids
+            for event_id in sorted(event_ids)
         )
         desc_text = " and ".join(s for s in [mob_text, event_text] if s)
 
@@ -1637,7 +1646,7 @@ def log_output_freqs(
         any_crate_prob = cgn.cdc["DropChance"] / cgn.cdc["DropChanceTotal"]
 
         for c_id in cgn.cdt["CrateIDs"]:
-            is_id = knowledge_base.drops["Crates"][c_id]["ItemSetID"]
+            is_id = ckb.knowledge_base.drops["Crates"][c_id]["ItemSetID"]
             if is_id in all_crates:
                 del all_crates[is_id]
 
@@ -1670,7 +1679,7 @@ def log_output_freqs(
         }
 
         logging.info(
-            "Final values for %s: %s\nBS: %s GS: %s",
+            "Final values for %s: %s\nBoys Sum: %s Girls Sum: %s",
             desc_text,
             json.dumps(all_prob_info, indent=4),
             sum(prob["Probability"] for prob in all_prob_info["Boys"].values()),
@@ -1721,7 +1730,7 @@ def log_output_freqs(
         }
 
         logging.info(
-            "Final values for %s: %s\nBS: %s GS: %s",
+            "Final values for %s: %s\nBoys Sum: %s Girls Sum: %s",
             desc_text,
             json.dumps(all_prob_info, indent=4),
             sum(prob["Probability"] for prob in all_prob_info["Boys"].values()),
