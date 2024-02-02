@@ -283,34 +283,3 @@ class KnowledgeBase:
             d["ItemReferenceID"]: (d["Type"], d["ItemID"])
             for d in self.base_drops["ItemReferences"].values()
         }
-
-        self.irid_is_map = defaultdict(list)
-        for d in self.base_drops["ItemSets"].values():
-            for irid in d["ItemReferenceIDs"]:
-                self.irid_is_map[irid].append(d)
-
-        self.isid_crate_map = defaultdict(list)
-        for d in self.base_drops["Crates"].values():
-            self.isid_crate_map[d["ItemSetID"]].append(d)
-
-        self.cid_cdt_map = defaultdict(list)
-        for d in self.base_drops["CrateDropTypes"].values():
-            for cid in d["CrateIDs"]:
-                self.cid_cdt_map[cid].append(d)
-
-        self.cdtid_mobdrop_map = defaultdict(list)
-        for d in self.base_drops["MobDrops"].values():
-            self.cdtid_mobdrop_map[d["CrateDropTypeID"]].append(d)
-
-        self.cdcid_cdc_map = {
-            d["CrateDropChanceID"]: d
-            for d in self.base_drops["CrateDropChances"].values()
-        }
-
-        self.mdid_mob_map = defaultdict(list)
-        for d in self.base_drops["Mobs"].values():
-            self.mdid_mob_map[d["MobDropID"]].append(d)
-
-        self.mdid_event_map = defaultdict(list)
-        for d in self.base_drops["Events"].values():
-            self.mdid_event_map[d["MobDropID"]].append(d)
