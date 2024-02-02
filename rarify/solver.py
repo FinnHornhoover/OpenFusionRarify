@@ -10,7 +10,7 @@ from .drops import Data
 from .knowledge_base import KnowledgeBase
 from .config import ItemConfig, OTHER_STANDARD_ID, OTHER_STANDARD_KEYWORD
 
-REL_TOL = 0.0001
+REL_TOL = 0.001
 
 
 def inv(a: float) -> float:
@@ -39,10 +39,11 @@ def log_entry_end(func):
             for k, v in kwargs.items()
             if isinstance(v, (int, float, bool, bytes, str, list, set, dict))
         }
-        logging.debug(f'Injecting start {func.__name__} Args: {args} {filtered_kwargs}')
+        logging.debug(f"Injecting start {func.__name__} Args: {args} {filtered_kwargs}")
         val = func(*args, **kwargs)
-        logging.debug(f'Injecting end {func.__name__}')
+        logging.debug(f"Injecting end {func.__name__}")
         return val
+
     return wrapper
 
 
@@ -187,7 +188,7 @@ class ItemSetNode:
                             if other_ir_id != ir_id
                         ]
                     )
-                    success = (other_probs_sum + prob <= 1.0)
+                    success = other_probs_sum + prob <= 1.0
 
         return success
 
@@ -549,16 +550,18 @@ class CrateGroupNode:
         self.refresh_crates()
 
     def refresh_crates(self) -> None:
-        self.ir_is_ids.update({
-            ir_id: {
-                is_id
-                for map_name_is, is_id in self.knowledge_base.drops.references.get(
-                    ("ItemReferences", ir_id), []
-                )
-                if map_name_is == "ItemSets"
+        self.ir_is_ids.update(
+            {
+                ir_id: {
+                    is_id
+                    for map_name_is, is_id in self.knowledge_base.drops.references.get(
+                        ("ItemReferences", ir_id), []
+                    )
+                    if map_name_is == "ItemSets"
+                }
+                for ir_id in self.ir_is_ids
             }
-            for ir_id in self.ir_is_ids
-        })
+        )
 
         self.is_id_index: Dict[int, Set[int]] = defaultdict(set)
         self.crate_nodes: List[CrateNode] = []
@@ -703,7 +706,9 @@ class CrateGroupNode:
                     if index in freq_group:
                         freq_group.remove(index)
 
-                if self.crate_nodes[index].itemset_node.preview_inject(ir_id, desired_prob):
+                if self.crate_nodes[index].itemset_node.preview_inject(
+                    ir_id=ir_id, prob=desired_prob
+                ):
                     groups_append(desired_freq, index)
 
             freq_groups = {
@@ -723,11 +728,15 @@ class CrateGroupNode:
                 if i == 0:
                     is_id = current_is_id
                 else:
-                    new_itemset = self.itemset_register[current_is_id].itemset.deepcopy()
+                    new_itemset = self.itemset_register[
+                        current_is_id
+                    ].itemset.deepcopy()
                     is_id = self.knowledge_base.drops["ItemSets"].add(new_itemset)
 
                     for ir_id in new_itemset["ItemReferenceIDs"]:
-                        self.knowledge_base.drops.references[('ItemReferences', ir_id)].add(('ItemSets', is_id))
+                        self.knowledge_base.drops.references[
+                            ("ItemReferences", ir_id)
+                        ].add(("ItemSets", is_id))
 
                 main_index = None
                 crate_prob = inv(freq)
@@ -746,7 +755,9 @@ class CrateGroupNode:
                     )
 
                     if main_index is None:
-                        if self.crate_register[crate_id].itemset_node.preview_inject(ir_id, crate_prob):
+                        if self.crate_register[crate_id].itemset_node.preview_inject(
+                            ir_id=ir_id, prob=crate_prob
+                        ):
                             main_index = index
                         else:
                             logging.warn(
@@ -811,7 +822,9 @@ class CrateGroupNode:
             gender_id = max(1, main_crate_node.itemset_node.effective_gender_id(ir_id))
             rarity_id = main_crate_node.itemset_node.effective_rarity_id(ir_id)
 
-            is_prob = main_crate_node.discount_explained_prob(ir_id=ir_id, prob=main_crate_prob)
+            is_prob = main_crate_node.discount_explained_prob(
+                ir_id=ir_id, prob=main_crate_prob
+            )
             main_prob = cdw[main_index] * main_crate_prob / cdwt
             main_probs[main_index] = main_prob
             crate_injections[main_index] = is_prob
@@ -821,11 +834,13 @@ class CrateGroupNode:
                 rw_weights = crate_node.allowed_rarities(gender_id)
                 rw_sum = sum(rw_weights.values())
 
-                crate_prob = sum([
-                    is_prob * rw / rw_sum
-                    for r_id, rw in rw_weights.items()
-                    if rarity_id in [0, r_id]
-                ])
+                crate_prob = sum(
+                    [
+                        is_prob * rw / rw_sum
+                        for r_id, rw in rw_weights.items()
+                        if rarity_id in [0, r_id]
+                    ]
+                )
                 sum_probs += cdw[index] * crate_prob / cdwt
 
         return {
@@ -842,11 +857,15 @@ class CrateGroupNode:
         crate_injections = (
             self.generate_split_injections(ir_id=ir_id, crate_target_probs=prob)
             if isinstance(prob, dict)
-            else self.generate_whole_injections(ir_id=ir_id, prob=prob, ignore_any_crate_prob=ignore_any_crate_prob)
+            else self.generate_whole_injections(
+                ir_id=ir_id, prob=prob, ignore_any_crate_prob=ignore_any_crate_prob
+            )
         )
 
         for crate_index, is_prob in crate_injections.items():
-            self.crate_nodes[crate_index].itemset_node.inject(ir_id=ir_id, prob=is_prob, agg=self.agg)
+            self.crate_nodes[crate_index].itemset_node.inject(
+                ir_id=ir_id, prob=is_prob, agg=self.agg
+            )
 
 
 class ConfigKnowledgeBase:
@@ -951,8 +970,6 @@ class ConfigKnowledgeBase:
             self.knowledge_base.irid_tuple_map[ir_id] = item_tuple
 
         return ir_id
-
-
 
 
 @log_entry_end
@@ -1604,9 +1621,9 @@ def log_output_freqs(
 
                 current_prob = (
                     prob
-                    + all_prob_info[gender_name].get(
-                        item_str, {"Probability": 0.0}
-                    )["Probability"]
+                    + all_prob_info[gender_name].get(item_str, {"Probability": 0.0})[
+                        "Probability"
+                    ]
                 )
                 freq = inv(current_prob)
                 freq_crates = freq * any_crate_prob
@@ -1618,7 +1635,9 @@ def log_output_freqs(
                 }
 
         all_prob_info = {
-            gender_name: dict(sorted(gender_dict.items(), key=lambda t: t[1]["Probability"]))
+            gender_name: dict(
+                sorted(gender_dict.items(), key=lambda t: t[1]["Probability"])
+            )
             for gender_name, gender_dict in all_prob_info.items()
         }
 
@@ -1667,7 +1686,9 @@ def log_output_freqs(
                     }
 
         all_prob_info = {
-            gender_name: dict(sorted(gender_dict.items(), key=lambda t: t[1]["Probability"]))
+            gender_name: dict(
+                sorted(gender_dict.items(), key=lambda t: t[1]["Probability"])
+            )
             for gender_name, gender_dict in all_prob_info.items()
         }
 

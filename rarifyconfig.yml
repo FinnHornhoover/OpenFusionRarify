@@ -103,6 +103,8 @@ items:
     # approximately how many of a certain specific crate get you the item
     named-crates-till-item:
       # you can use crate ids or certain names
+      # note that adding crates that are droppable here will work
+      # but it might mess up your previous requests involving kills and crates
       100: 10000
       Spring Chicken CRATE: 80
 
