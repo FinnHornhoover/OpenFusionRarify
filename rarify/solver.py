@@ -6,9 +6,9 @@ from functools import wraps
 from collections import defaultdict
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
-from .drops import Data
-from .knowledge_base import KnowledgeBase
-from .config import Config, ItemConfig, OTHER_STANDARD_ID, OTHER_STANDARD_KEYWORD
+from rarify.drops import Data
+from rarify.knowledge_base import KnowledgeBase
+from rarify.config import Config, ItemConfig, OTHER_STANDARD_ID, OTHER_STANDARD_KEYWORD
 
 
 def inv(a: float) -> float:

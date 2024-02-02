@@ -1,8 +1,8 @@
 import json
 from collections import defaultdict
 
-from .config import Config, sanitize_key
-from .drops import Drops, get_patched
+from rarify.config import Config, sanitize_key
+from rarify.drops import Drops, get_patched
 
 
 class KnowledgeBase:

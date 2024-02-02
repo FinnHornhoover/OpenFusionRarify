@@ -61,7 +61,7 @@ class Config:
 
 @dataclass
 class ItemConfig:
-    from .knowledge_base import KnowledgeBase
+    from rarify.knowledge_base import KnowledgeBase
 
     type: int
     type_name: str

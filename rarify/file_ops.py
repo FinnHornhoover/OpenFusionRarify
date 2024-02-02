@@ -4,9 +4,9 @@ from typing import List, Tuple, Optional
 
 import yaml
 
-from .config import Config, ItemConfig
-from .drops import generate_patch
-from .knowledge_base import KnowledgeBase
+from rarify.config import Config, ItemConfig
+from rarify.drops import generate_patch
+from rarify.knowledge_base import KnowledgeBase
 
 
 def load_data(
