@@ -577,6 +577,25 @@ class CrateGroupNode:
             self.is_id_index[crate_node.itemset_node.is_id].add(index)
             self.crate_nodes.append(crate_node)
 
+    def register(self, ir_id: int, crate_types: Optional[Set[int]] = None) -> None:
+        if not crate_types and any(
+            ir_id in self.drop_pool(gender_id=gender_id) for gender_id in range(1, 3)
+        ):
+            return
+
+        # do not add ETC crates by default
+        default_crate_types = {1, 2, 3, 4} if len(self.crate_nodes) == 5 else {0}
+        crate_types = crate_types or default_crate_types
+
+        for crate_index in crate_types:
+            crate_node = self.crate_nodes[crate_index]
+
+            crate_node.register(ir_id=ir_id)
+
+            if ir_id not in self.ir_is_ids:
+                self.ir_is_ids = set()
+            self.ir_is_ids[ir_id].add(crate_node.itemset_node.is_id)
+
     def discount_explained_prob(
         self,
         crate_index: int,
@@ -592,11 +611,8 @@ class CrateGroupNode:
         else:
             discounted_prob = (
                 prob
-                * cdwt
-                / (
-                    cdw[crate_index]
-                    * (1.0 if ignore_any_crate_prob else any_crate_prob)
-                )
+                * (cdwt / cdw[crate_index])
+                * (1.0 if ignore_any_crate_prob else 1.0 / any_crate_prob)
             )
 
         logging.debug(
@@ -695,7 +711,6 @@ class CrateGroupNode:
                 if index not in fixed_crate_target_probs:
                     continue
 
-                # TODO: distinguish between "I want to delete this item vs I cannot drop this item"
                 desired_prob = self.crate_nodes[index].discount_explained_prob(
                     ir_id=ir_id,
                     prob=fixed_crate_target_probs[index],
@@ -854,13 +869,16 @@ class CrateGroupNode:
         prob: Union[float, Dict[int, float]],
         ignore_any_crate_prob: bool = False,
     ) -> None:
-        crate_injections = (
-            self.generate_split_injections(ir_id=ir_id, crate_target_probs=prob)
-            if isinstance(prob, dict)
-            else self.generate_whole_injections(
+        if isinstance(prob, dict):
+            self.register(ir_id=ir_id, crate_types=set(prob.keys()))
+            crate_injections = self.generate_split_injections(
+                ir_id=ir_id, crate_target_probs=prob
+            )
+        else:
+            self.register(ir_id=ir_id)
+            crate_injections = self.generate_whole_injections(
                 ir_id=ir_id, prob=prob, ignore_any_crate_prob=ignore_any_crate_prob
             )
-        )
 
         for crate_index, is_prob in crate_injections.items():
             self.crate_nodes[crate_index].itemset_node.inject(
@@ -876,19 +894,20 @@ class ConfigKnowledgeBase:
         agg: Callable = min,
     ) -> None:
         self.knowledge_base = knowledge_base
+        self.agg = agg
 
         references = knowledge_base.drops.references
         self.ir_is_ids = {
-            self.get_ir_id(item_config): {
+            ir_id: {
                 is_id
-                for map_name_is, is_id in references.get(
-                    ("ItemReferences", self.get_ir_id(item_config)), []
-                )
+                for map_name_is, is_id in references.get(("ItemReferences", ir_id), [])
                 if map_name_is == "ItemSets"
             }
             for item_config in item_configs
+            for ir_id in [self.get_ir_id(item_config)]
         }
         self.itemset_register = {
+            # the filtering here won't matter, but it doesn't hurt either
             is_id: ItemSetNode(knowledge_base, is_id)
             for is_ids in self.ir_is_ids.values()
             for is_id in is_ids
@@ -941,15 +960,7 @@ class ConfigKnowledgeBase:
                                 self.crate_drop_e_ids[tpl].add(me_id)
 
         self.crate_group_register = {
-            (cdc_id, cdt_id): CrateGroupNode(
-                knowledge_base=knowledge_base,
-                itemset_register=self.itemset_register,
-                crate_register=self.crate_register,
-                ir_is_ids=self.ir_is_ids,
-                cdc_id=cdc_id,
-                cdt_id=cdt_id,
-                agg=agg,
-            )
+            (cdc_id, cdt_id): self.make_crate_group_register(cdc_id, cdt_id)
             for tpls in self.ir_tuples.values()
             for cdc_id, cdt_id in tpls
         }
@@ -970,6 +981,17 @@ class ConfigKnowledgeBase:
             self.knowledge_base.irid_tuple_map[ir_id] = item_tuple
 
         return ir_id
+
+    def make_crate_group_register(self, cdc_id: int, cdt_id: int) -> CrateGroupNode:
+        return CrateGroupNode(
+            knowledge_base=self.knowledge_base,
+            itemset_register=self.itemset_register,
+            crate_register=self.crate_register,
+            ir_is_ids=self.ir_is_ids,
+            cdc_id=cdc_id,
+            cdt_id=cdt_id,
+            agg=self.agg,
+        )
 
 
 @log_entry_end
@@ -1008,35 +1030,32 @@ def inject_mob_event_freq_value(
 
         mob_event = ckb.knowledge_base.drops[map_name][mob_event_id]
         mob_drop = ckb.knowledge_base.drops["MobDrops"][mob_event["MobDropID"]]
-
-        found_tuples = set()
-
         tpl = (mob_drop["CrateDropChanceID"], mob_drop["CrateDropTypeID"])
 
-        if tpl in ckb.ir_tuples[ir_id]:
-            found_tuples.add(tpl)
+        if tpl not in ckb.crate_group_register:
+            ckb.crate_group_register[tpl] = ckb.make_crate_group_register(*tpl)
 
-        for tpl in found_tuples:
-            value = 1.0 / freq
+        value = 1.0 / freq
 
-            if tpl in filtered_config:
-                old_value = filtered_config[tpl]
-                next_value = agg([old_value, value])
-                logging.warn(
-                    "%s %s for item %s refers to the same drop table as an "
-                    "existing config, where the value was %s, and is set to %s "
-                    "now. Using %s ...",
-                    map_name[:-1],
-                    mob_event_id,
-                    item_name,
-                    old_value,
-                    value,
-                    next_value,
-                )
-            else:
-                next_value = value
+        if tpl in filtered_config:
+            old_value = filtered_config[tpl]
+            next_value = agg([old_value, value])
+            logging.warn(
+                "%s %s for item %s refers to the same drop table as an "
+                "existing config, where the value was %s, and is set to %s "
+                "now. Using %s ...",
+                map_name[:-1],
+                mob_event_id,
+                item_name,
+                old_value,
+                value,
+                next_value,
+            )
+        else:
+            next_value = value
 
-            filtered_config[tpl] = next_value
+        filtered_config[tpl] = next_value
+        if tpl in unspecified_tuples:
             unspecified_tuples.remove(tpl)
 
     if OTHER_STANDARD_ID in freq_per_mob_event:
@@ -1135,25 +1154,22 @@ def inject_mob_and_crate_type_freq_value(
 
         mob = ckb.knowledge_base.drops["Mobs"][mob_id]
         mob_drop = ckb.knowledge_base.drops["MobDrops"][mob["MobDropID"]]
-
-        found_tuples = set()
-
         tpl = (mob_drop["CrateDropChanceID"], mob_drop["CrateDropTypeID"])
 
-        if tpl in ckb.ir_tuples[ir_id]:
-            found_tuples.add(tpl)
+        if tpl not in ckb.crate_group_register:
+            ckb.crate_group_register[tpl] = ckb.make_crate_group_register(*tpl)
 
-        for tpl in found_tuples:
-            inject_crate_type_freq_value(
-                ckb=ckb,
-                ir_id=ir_id,
-                item_name=item_name,
-                freq_per_crate_type=freq_per_crate_type,
-                agg=agg,
-                extra_id_str=f"Mob {mob_id} ",
-                allowed_tuple=tpl,
-            )
+        inject_crate_type_freq_value(
+            ckb=ckb,
+            ir_id=ir_id,
+            item_name=item_name,
+            freq_per_crate_type=freq_per_crate_type,
+            agg=agg,
+            extra_id_str=f"Mob {mob_id} ",
+            allowed_tuple=tpl,
+        )
 
+        if tpl in unspecified_tuples:
             unspecified_tuples.remove(tpl)
 
     if OTHER_STANDARD_ID in freq_per_mob_and_crate_type:
