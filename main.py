@@ -31,7 +31,7 @@ def main() -> None:
 
     knowledge_base, config, item_configs = load_data(config_path)
 
-    alter_chances(knowledge_base, item_configs)
+    alter_chances(knowledge_base, config, item_configs)
     save_new_drops(knowledge_base, config)
 
 

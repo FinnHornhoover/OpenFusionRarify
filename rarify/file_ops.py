@@ -29,14 +29,7 @@ def load_data(
     with open(config_path) as r:
         config_data = yaml.safe_load(r)
 
-    config = Config(
-        base=Path(config_data["base"]),
-        patches=[Path(patch_path) for patch_path in (config_data.get("patches") or [])],
-        xdt=Path(config_data["xdt"]),
-        output=Path(config_data["output"]),
-        generate_patch=bool(config_data["generate-patch"]),
-    )
-
+    config = Config.from_dict(config_data)
     knowledge_base = KnowledgeBase(config)
     item_configs = [
         ItemConfig.from_dict(knowledge_base, data) for data in config_data["items"]

@@ -8,9 +8,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 from .drops import Data
 from .knowledge_base import KnowledgeBase
-from .config import ItemConfig, OTHER_STANDARD_ID, OTHER_STANDARD_KEYWORD
-
-REL_TOL = 0.001
+from .config import Config, ItemConfig, OTHER_STANDARD_ID, OTHER_STANDARD_KEYWORD
 
 
 def inv(a: float) -> float:
@@ -48,9 +46,18 @@ def log_entry_end(func):
 
 
 class ItemSetNode:
-    def __init__(self, knowledge_base: KnowledgeBase, is_id: int) -> None:
+    def __init__(
+        self,
+        knowledge_base: KnowledgeBase,
+        is_id: int,
+        agg: Callable,
+        rel_tol: float,
+    ) -> None:
         self.knowledge_base = knowledge_base
         self.is_id = is_id
+        self.agg = agg
+        self.rel_tol = rel_tol
+
         self.itemset: Data = knowledge_base.drops["ItemSets"][is_id]
         self.probs_to_change = {
             gender_id: {rarity_id: {} for rarity_id in range(1, 5)}
@@ -134,7 +141,7 @@ class ItemSetNode:
             for ir_id, weight in weights_scaled.items()
         }
 
-    def inject(self, ir_id: int, prob: float, agg: Callable = min) -> None:
+    def inject(self, ir_id: int, prob: float) -> None:
         item_gender_id = self.effective_gender_id(ir_id)
         item_rarity_id = self.effective_rarity_id(ir_id)
 
@@ -168,7 +175,7 @@ class ItemSetNode:
                         )
                         continue
 
-                    pool_dict[ir_id] = agg([pool_dict.get(ir_id, prob), prob])
+                    pool_dict[ir_id] = self.agg([pool_dict.get(ir_id, prob), prob])
 
     def preview_inject(self, ir_id: int, prob: float) -> bool:
         item_gender_id = self.effective_gender_id(ir_id)
@@ -222,7 +229,6 @@ class ItemSetNode:
     def get_scaled_int_weights(
         self,
         merged_probs: Dict[int, Dict[int, Dict[int, float]]],
-        agg: Callable = min,
     ) -> Dict[int, Dict[int, Dict[int, int]]]:
         def apply_scale(prob_dict: Dict[int, float], scale: int) -> Dict[int, int]:
             return {ir_id: int(scale * value) for ir_id, value in prob_dict.items()}
@@ -239,7 +245,7 @@ class ItemSetNode:
             cur_sum = sum(current_values.values())
 
             if all(
-                rel_diff(cur_sum * inv(value), inv(prob_dict[ir_id])) < REL_TOL
+                rel_diff(cur_sum * inv(value), inv(prob_dict[ir_id])) < self.rel_tol
                 for ir_id, value in current_values.items()
             ):
                 left = search(prob_dict, lo, mi - 1)
@@ -286,7 +292,7 @@ class ItemSetNode:
                 scales[gender_id] = max(scales[gender_id] * multp, scale)
 
         # where the true values of the gender are kept
-        main_gender_id, _ = agg(list(scales.items()), key=itemgetter(1))
+        main_gender_id, _ = self.agg(list(scales.items()), key=itemgetter(1))
         # where all other items are dumped from
         other_gender_id = 1 if main_gender_id == 2 else 2
 
@@ -323,7 +329,7 @@ class ItemSetNode:
             if weight != self.itemset["DefaultItemWeight"]
         }
 
-    def alter_drops_values(self, agg: Callable = min) -> None:
+    def alter_drops_values(self) -> None:
         if not any(
             len(pool_dict) > 0
             for rarity_dicts in self.probs_to_change.values()
@@ -380,7 +386,7 @@ class ItemSetNode:
             json.dumps(clean_merged_probs, indent=4),
         )
 
-        int_weights = self.get_scaled_int_weights(clean_merged_probs, agg=agg)
+        int_weights = self.get_scaled_int_weights(clean_merged_probs)
 
         logging.debug(
             "ItemSet %s int weights %s", self.is_id, json.dumps(int_weights, indent=4)
@@ -395,10 +401,14 @@ class CrateNode:
         knowledge_base: KnowledgeBase,
         itemset_register: Dict[int, ItemSetNode],
         c_id: int,
+        agg: Callable,
+        rel_tol: float,
     ) -> None:
         self.knowledge_base = knowledge_base
         self.itemset_register = itemset_register
         self.c_id = c_id
+        self.agg = agg
+        self.rel_tol = rel_tol
 
         self.crate = knowledge_base.drops["Crates"][c_id]
         self.rarity_weights = knowledge_base.drops["RarityWeights"][
@@ -407,7 +417,12 @@ class CrateNode:
 
         is_id = self.crate["ItemSetID"]
         if is_id not in self.itemset_register:
-            self.itemset_register[is_id] = ItemSetNode(knowledge_base, is_id)
+            self.itemset_register[is_id] = ItemSetNode(
+                knowledge_base=knowledge_base,
+                is_id=is_id,
+                agg=agg,
+                rel_tol=self.rel_tol,
+            )
 
         self.itemset_node = itemset_register[is_id]
 
@@ -509,12 +524,11 @@ class CrateNode:
 
         return rarity_agg
 
-    def inject(self, ir_id: int, prob: float, agg: Callable = min) -> None:
+    def inject(self, ir_id: int, prob: float) -> None:
         self.register(ir_id)
         self.itemset_node.inject(
             ir_id=ir_id,
             prob=self.discount_explained_prob(ir_id, prob),
-            agg=agg,
         )
 
     def preview_inject(self, ir_id: int, prob: float) -> bool:
@@ -534,7 +548,8 @@ class CrateGroupNode:
         ir_is_ids: Dict[int, Set[int]],
         cdc_id: int,
         cdt_id: int,
-        agg: Callable = min,
+        agg: Callable,
+        rel_tol: float,
     ) -> None:
         self.knowledge_base = knowledge_base
         self.itemset_register = itemset_register
@@ -543,6 +558,7 @@ class CrateGroupNode:
         self.cdc_id = cdc_id
         self.cdt_id = cdt_id
         self.agg = agg
+        self.rel_tol = rel_tol
 
         self.cdc = knowledge_base.drops["CrateDropChances"][cdc_id]
         self.cdt = knowledge_base.drops["CrateDropTypes"][cdt_id]
@@ -572,6 +588,8 @@ class CrateGroupNode:
                     knowledge_base=self.knowledge_base,
                     itemset_register=self.itemset_register,
                     c_id=crate_id,
+                    agg=self.agg,
+                    rel_tol=self.rel_tol,
                 )
             crate_node = self.crate_register[crate_id]
             self.is_id_index[crate_node.itemset_node.is_id].add(index)
@@ -680,7 +698,7 @@ class CrateGroupNode:
             def groups_append(item_freq: float, index: int) -> None:
                 added = False
                 for freq, freq_group in freq_groups.items():
-                    if rel_diff(item_freq, freq) < REL_TOL:
+                    if rel_diff(item_freq, freq) < self.rel_tol:
                         freq_group.append(index)
                         added = True
                         break
@@ -767,6 +785,8 @@ class CrateGroupNode:
                         knowledge_base=self.knowledge_base,
                         itemset_register=self.itemset_register,
                         c_id=crate_id,
+                        agg=self.agg,
+                        rel_tol=self.rel_tol,
                     )
 
                     if main_index is None:
@@ -882,7 +902,7 @@ class CrateGroupNode:
 
         for crate_index, is_prob in crate_injections.items():
             self.crate_nodes[crate_index].itemset_node.inject(
-                ir_id=ir_id, prob=is_prob, agg=self.agg
+                ir_id=ir_id, prob=is_prob
             )
 
 
@@ -891,10 +911,12 @@ class ConfigKnowledgeBase:
         self,
         knowledge_base: KnowledgeBase,
         item_configs: List[ItemConfig],
-        agg: Callable = min,
+        agg: Callable,
+        rel_tol: float,
     ) -> None:
         self.knowledge_base = knowledge_base
         self.agg = agg
+        self.rel_tol = rel_tol
 
         references = knowledge_base.drops.references
         self.ir_is_ids = {
@@ -908,7 +930,12 @@ class ConfigKnowledgeBase:
         }
         self.itemset_register = {
             # the filtering here won't matter, but it doesn't hurt either
-            is_id: ItemSetNode(knowledge_base, is_id)
+            is_id: ItemSetNode(
+                knowledge_base=knowledge_base,
+                is_id=is_id,
+                agg=agg,
+                rel_tol=rel_tol,
+            )
             for is_ids in self.ir_is_ids.values()
             for is_id in is_ids
         }
@@ -923,7 +950,13 @@ class ConfigKnowledgeBase:
             for ir_id, is_ids in self.ir_is_ids.items()
         }
         self.crate_register = {
-            c_id: CrateNode(knowledge_base, self.itemset_register, c_id)
+            c_id: CrateNode(
+                knowledge_base=knowledge_base,
+                itemset_register=self.itemset_register,
+                c_id=c_id,
+                agg=agg,
+                rel_tol=rel_tol,
+            )
             # pull them all, we need to recognize any and all crates
             for c_id in knowledge_base.drops["Crates"]
         }
@@ -991,6 +1024,7 @@ class ConfigKnowledgeBase:
             cdc_id=cdc_id,
             cdt_id=cdt_id,
             agg=self.agg,
+            rel_tol=self.rel_tol,
         )
 
 
@@ -1000,7 +1034,6 @@ def inject_freq_value(
     ir_id: int,
     freq: float,
     ignore_any_crate_prob: bool = False,
-    agg: Callable = min,
 ) -> None:
     prob = 1.0 / freq
     for tpl in ckb.ir_tuples[ir_id]:
@@ -1019,7 +1052,6 @@ def inject_mob_event_freq_value(
     map_name: str,
     freq_per_mob_event: Dict[int, float],
     ignore_any_crate_prob: bool = False,
-    agg: Callable = min,
 ) -> None:
     filtered_config = {}
     unspecified_tuples = ckb.ir_tuples[ir_id].copy()
@@ -1039,7 +1071,7 @@ def inject_mob_event_freq_value(
 
         if tpl in filtered_config:
             old_value = filtered_config[tpl]
-            next_value = agg([old_value, value])
+            next_value = ckb.agg([old_value, value])
             logging.warn(
                 "%s %s for item %s refers to the same drop table as an "
                 "existing config, where the value was %s, and is set to %s "
@@ -1077,7 +1109,6 @@ def inject_crate_type_freq_value(
     ir_id: int,
     item_name: str,
     freq_per_crate_type: Dict[str, float],
-    agg: Callable = min,
     extra_id_str: str = "",
     allowed_tuple: Optional[Tuple[int, int]] = None,
     other_crate_types: Optional[Set[str]] = None,
@@ -1093,7 +1124,7 @@ def inject_crate_type_freq_value(
 
         if crate_index in crate_target_probs:
             old_value = crate_target_probs[crate_index]
-            next_value = agg([old_value, value])
+            next_value = ckb.agg([old_value, value])
             logging.warn(
                 "%sCRATE type %s for item %s refers to the same drop table as an "
                 "existing config, where the value was %s, and is set to %s "
@@ -1144,7 +1175,6 @@ def inject_mob_and_crate_type_freq_value(
     ir_id: int,
     item_name: str,
     freq_per_mob_and_crate_type: Dict[int, Dict[str, float]],
-    agg: Callable = min,
 ) -> None:
     unspecified_tuples = ckb.ir_tuples[ir_id].copy()
 
@@ -1164,7 +1194,6 @@ def inject_mob_and_crate_type_freq_value(
             ir_id=ir_id,
             item_name=item_name,
             freq_per_crate_type=freq_per_crate_type,
-            agg=agg,
             extra_id_str=f"Mob {mob_id} ",
             allowed_tuple=tpl,
         )
@@ -1179,7 +1208,6 @@ def inject_mob_and_crate_type_freq_value(
                 ir_id=ir_id,
                 item_name=item_name,
                 freq_per_crate_type=freq_per_mob_and_crate_type[OTHER_STANDARD_ID],
-                agg=agg,
                 extra_id_str=f"Crate group {tpl} ",
                 allowed_tuple=tpl,
             )
@@ -1191,7 +1219,6 @@ def inject_racing_crate_type_freq_value(
     ir_id: int,
     freq_per_crate_type: Dict[str, float],
     epid: int,
-    agg: Callable = min,
 ) -> None:
     racing = ckb.knowledge_base.drops["Racing"][epid]
     allowed_crate_types = {
@@ -1216,7 +1243,7 @@ def inject_racing_crate_type_freq_value(
 
         crate_id = allowed_crate_types[crate_type]
         prob = 1.0 / freq
-        ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
+        ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob)
         unused_crate_types.remove(crate_type)
 
     if OTHER_STANDARD_KEYWORD in freq_per_crate_type:
@@ -1224,7 +1251,7 @@ def inject_racing_crate_type_freq_value(
 
         for crate_type in unused_crate_types:
             crate_id = allowed_crate_types[crate_type]
-            ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
+            ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob)
 
 
 @log_entry_end
@@ -1232,7 +1259,6 @@ def inject_racing_freq_value(
     ckb: ConfigKnowledgeBase,
     ir_id: int,
     freq_per_iz_and_crate: Dict[int, Dict[str, float]],
-    agg: Callable = min,
 ) -> None:
     unused_izs = set(ckb.knowledge_base.iz_name_id_map.values())
 
@@ -1245,7 +1271,6 @@ def inject_racing_freq_value(
             ir_id=ir_id,
             freq_per_crate_type=freq_per_crate_type,
             epid=epid,
-            agg=agg,
         )
         unused_izs.remove(epid)
 
@@ -1258,7 +1283,6 @@ def inject_racing_freq_value(
                 ir_id=ir_id,
                 freq_per_crate_type=freq_per_crate_type,
                 epid=epid,
-                agg=agg,
             )
 
 
@@ -1267,7 +1291,6 @@ def inject_mission_freq_values(
     ckb: ConfigKnowledgeBase,
     ir_id: int,
     freq_per_mission_level: Dict[int, float],
-    agg: Callable = min,
 ) -> None:
     unused_levels = set(ckb.knowledge_base.mission_level_crate_id_map.keys())
 
@@ -1275,7 +1298,7 @@ def inject_mission_freq_values(
         prob = 1.0 / freq
 
         for crate_id in ckb.knowledge_base.mission_level_crate_id_map[level]:
-            ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
+            ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob)
 
         unused_levels.remove(level)
 
@@ -1284,7 +1307,7 @@ def inject_mission_freq_values(
 
         for level in unused_levels:
             for crate_id in ckb.knowledge_base.mission_level_crate_id_map[level]:
-                ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
+                ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob)
 
 
 @log_entry_end
@@ -1293,7 +1316,6 @@ def inject_egger_crate_type_freq_value(
     ir_id: int,
     freq_per_crate_type: Dict[str, float],
     zone: str,
-    agg: Callable = min,
 ) -> None:
     mystery_egg_crates = ckb.knowledge_base.zone_to_mystery_egger_map[zone]
     unused_crate_types = set(mystery_egg_crates.keys())
@@ -1312,7 +1334,7 @@ def inject_egger_crate_type_freq_value(
 
         crate_id = mystery_egg_crates[crate_type]
         prob = 1.0 / freq
-        ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
+        ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob)
         unused_crate_types.remove(crate_type)
 
     if OTHER_STANDARD_KEYWORD in freq_per_crate_type:
@@ -1320,7 +1342,7 @@ def inject_egger_crate_type_freq_value(
 
         for crate_type in unused_crate_types:
             crate_id = mystery_egg_crates[crate_id]
-            ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
+            ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob)
 
 
 @log_entry_end
@@ -1328,7 +1350,6 @@ def inject_egger_freq_values(
     ckb: ConfigKnowledgeBase,
     ir_id: int,
     freq_per_zone_and_crate_type: Dict[str, Dict[str, float]],
-    agg: Callable = min,
 ) -> None:
     unused_zones = set(ckb.knowledge_base.zone_to_egger_map.keys())
 
@@ -1341,7 +1362,6 @@ def inject_egger_freq_values(
             ir_id=ir_id,
             freq_per_crate_type=freq_per_crate_type,
             zone=zone,
-            agg=agg,
         )
         unused_zones.remove(zone)
 
@@ -1354,7 +1374,6 @@ def inject_egger_freq_values(
                 ir_id=ir_id,
                 freq_per_crate_type=freq_per_crate_type,
                 zone=zone,
-                agg=agg,
             )
 
 
@@ -1363,7 +1382,6 @@ def inject_golden_egg_freq_values(
     ckb: ConfigKnowledgeBase,
     ir_id: int,
     freq_per_area: Dict[str, float],
-    agg: Callable = min,
 ) -> None:
     filtered_config = {}
     unused_areas = set(ckb.knowledge_base.area_eggs.keys())
@@ -1377,7 +1395,7 @@ def inject_golden_egg_freq_values(
         for crate_id in ckb.knowledge_base.area_eggs[area]:
             if crate_id in filtered_config:
                 old_value = filtered_config[crate_id]
-                next_value = agg([old_value, value])
+                next_value = ckb.agg([old_value, value])
                 logging.warn(
                     "Area %s for Golden Egg refers to the same CRATE ID %s with an "
                     "existing config, where the value was %s, and is set to %s "
@@ -1401,7 +1419,7 @@ def inject_golden_egg_freq_values(
             filtered_config[crate_id] = value
 
     for crate_id, prob in filtered_config.items():
-        ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
+        ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob)
 
 
 @log_entry_end
@@ -1409,23 +1427,27 @@ def inject_named_crate_freq_values(
     ckb: ConfigKnowledgeBase,
     ir_id: int,
     freq_per_crate_id: Dict[int, float],
-    agg: Callable = min,
 ) -> None:
     for crate_id, freq in freq_per_crate_id.items():
         prob = 1.0 / freq
-        ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob, agg=agg)
+        ckb.crate_register[crate_id].inject(ir_id=ir_id, prob=prob)
 
 
 def alter_chances(
     knowledge_base: KnowledgeBase,
+    config: Config,
     item_configs: Optional[List[ItemConfig]],
-    agg: Callable = min,
 ) -> None:
     if not item_configs:
         logging.warn("No valid item configs found, skipping the calculation step...")
         return
 
-    ckb = ConfigKnowledgeBase(knowledge_base, item_configs, agg=agg)
+    ckb = ConfigKnowledgeBase(
+        knowledge_base=knowledge_base,
+        item_configs=item_configs,
+        agg=(min if config.blend_using_lowest_chance else max),
+        rel_tol=config.rel_tol,
+    )
 
     for item_config in item_configs:
         ir_id = ckb.get_ir_id(item_config)
@@ -1436,7 +1458,6 @@ def alter_chances(
                 ir_id=ir_id,
                 freq=item_config.kills_till_item,
                 ignore_any_crate_prob=False,
-                agg=agg,
             )
 
         if item_config.kills_till_item_per_mob:
@@ -1447,7 +1468,6 @@ def alter_chances(
                 map_name="Mobs",
                 freq_per_mob_event=item_config.kills_till_item_per_mob,
                 ignore_any_crate_prob=False,
-                agg=agg,
             )
 
         if item_config.crates_till_item is not None:
@@ -1456,7 +1476,6 @@ def alter_chances(
                 ir_id=ir_id,
                 freq=item_config.crates_till_item,
                 ignore_any_crate_prob=True,
-                agg=agg,
             )
 
         if item_config.crates_till_item_per_mob:
@@ -1467,7 +1486,6 @@ def alter_chances(
                 map_name="Mobs",
                 freq_per_mob_event=item_config.crates_till_item_per_mob,
                 ignore_any_crate_prob=True,
-                agg=agg,
             )
 
         if item_config.crates_till_item_per_crate_type:
@@ -1476,7 +1494,6 @@ def alter_chances(
                 ir_id=ir_id,
                 item_name=item_config.name,
                 freq_per_crate_type=item_config.crates_till_item_per_crate_type,
-                agg=agg,
             )
 
         crates_till_item_per_crate_type_and_mob = (
@@ -1502,7 +1519,6 @@ def alter_chances(
                 ir_id=ir_id,
                 item_name=item_config.name,
                 freq_per_mob_and_crate_type=crates_till_item_per_mob_and_crate_type,
-                agg=agg,
             )
 
         if item_config.event_kills_till_item:
@@ -1513,7 +1529,6 @@ def alter_chances(
                 map_name="Events",
                 freq_per_mob_event=item_config.event_kills_till_item,
                 ignore_any_crate_prob=False,
-                agg=agg,
             )
 
         if item_config.event_crates_till_item:
@@ -1524,7 +1539,6 @@ def alter_chances(
                 map_name="Events",
                 freq_per_mob_event=item_config.event_crates_till_item,
                 ignore_any_crate_prob=True,
-                agg=agg,
             )
 
         if item_config.race_crates_till_item:
@@ -1532,7 +1546,6 @@ def alter_chances(
                 ckb=ckb,
                 ir_id=ir_id,
                 freq_per_iz_and_crate=item_config.race_crates_till_item,
-                agg=agg,
             )
 
         if item_config.mission_crates_till_item:
@@ -1540,7 +1553,6 @@ def alter_chances(
                 ckb=ckb,
                 ir_id=ir_id,
                 freq_per_mission_level=item_config.mission_crates_till_item,
-                agg=agg,
             )
 
         if item_config.egger_eggs_till_item:
@@ -1548,7 +1560,6 @@ def alter_chances(
                 ckb=ckb,
                 ir_id=ir_id,
                 freq_per_zone_and_crate_type=item_config.egger_eggs_till_item,
-                agg=agg,
             )
 
         if item_config.golden_eggs_till_item:
@@ -1556,7 +1567,6 @@ def alter_chances(
                 ckb=ckb,
                 ir_id=ir_id,
                 freq_per_area=item_config.golden_eggs_till_item,
-                agg=agg,
             )
 
         if item_config.named_crates_till_item:
@@ -1564,27 +1574,29 @@ def alter_chances(
                 ckb=ckb,
                 ir_id=ir_id,
                 freq_per_crate_id=item_config.named_crates_till_item,
-                agg=agg,
             )
 
     for itemset_node in ckb.itemset_register.values():
-        itemset_node.alter_drops_values(agg=agg)
+        itemset_node.alter_drops_values()
 
-    log_output_freqs(knowledge_base, item_configs, agg=agg)
+    log_output_freqs(knowledge_base, config, item_configs)
 
 
 def log_output_freqs(
     knowledge_base: KnowledgeBase,
+    config: Config,
     item_configs: Optional[List[ItemConfig]],
-    agg: Callable = min,
 ) -> None:
-    pass
-
     if not item_configs:
         logging.warn("No valid item configs found, skipping the calculation step...")
         return
 
-    ckb = ConfigKnowledgeBase(knowledge_base, item_configs, agg=agg)
+    ckb = ConfigKnowledgeBase(
+        knowledge_base=knowledge_base,
+        item_configs=item_configs,
+        agg=(min if config.blend_using_lowest_chance else max),
+        rel_tol=config.rel_tol,
+    )
 
     all_crates = defaultdict(set)
     all_tuples = set()

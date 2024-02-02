@@ -26,6 +26,37 @@ class Config:
     xdt: Path
     output: Path
     generate_patch: bool
+    log_level: str
+    rel_tol: float
+    blend_using_lowest_chance: bool
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Config":
+        data_sanitized = {
+            sanitize_key(key).replace(" ", "_"): value for key, value in data.items()
+        }
+
+        config = Config(
+            base=Path(data_sanitized["base"]),
+            patches=[
+                Path(patch_path) for patch_path in (data_sanitized.get("patches") or [])
+            ],
+            xdt=Path(data_sanitized["xdt"]),
+            output=Path(data_sanitized["output"]),
+            generate_patch=bool(data_sanitized.get("generate_patch", True)),
+            log_level=sanitize_key(
+                str(data_sanitized.get("log_level", "INFO"))
+            ).upper(),
+            rel_tol=float(data_sanitized.get("rel_tol", 0.001)),
+            blend_using_lowest_chance=bool(
+                data_sanitized.get("blend_using_lowest_chance", True)
+            ),
+        )
+
+        # set this as early as possible at the root level
+        logging.getLogger().setLevel(config.log_level)
+
+        return config
 
 
 @dataclass

@@ -9,6 +9,15 @@ xdt: ../OpenFusion/tdata/xdt1013.json
 output: target/
 # yes generates a patch, no generates a single merged drops.json in the "output" folder
 generate-patch: yes
+# logging level, stops logs from printing on lower levels than the set level
+# the order is (DEBUG, INFO, WARNING, ERROR, CRITICAL), by default it is INFO
+log-level: info
+# relative tolerance in matched values (i.e. at most this fraction of error is acceptable)
+# increase to lower the weights that are in your output json file, decrease for more accuracy
+rel-tol: 0.001
+# whether to select the least likely of conflicting options when resolving them
+# setting this to no will mean we should select the most likely one
+blend-using-lowest-chance: yes
 
 # describe how you want to adjust the rarity of items here
 items:
