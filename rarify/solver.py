@@ -901,9 +901,7 @@ class CrateGroupNode:
             )
 
         for crate_index, is_prob in crate_injections.items():
-            self.crate_nodes[crate_index].itemset_node.inject(
-                ir_id=ir_id, prob=is_prob
-            )
+            self.crate_nodes[crate_index].itemset_node.inject(ir_id=ir_id, prob=is_prob)
 
 
 class ConfigKnowledgeBase:
@@ -1616,7 +1614,9 @@ def log_output_freqs(
 
     for tpls in ckb.ir_tuples.values():
         for cdc_id, cdt_id in tpls:
-            for crate_id in ckb.knowledge_base.drops["CrateDropTypes"][cdt_id]["CrateIDs"]:
+            for crate_id in ckb.knowledge_base.drops["CrateDropTypes"][cdt_id][
+                "CrateIDs"
+            ]:
                 is_id = ckb.knowledge_base.drops["Crates"][crate_id]["ItemSetID"]
                 if is_id in all_itemsets:
                     all_tuples.add((cdc_id, cdt_id))
