@@ -738,6 +738,10 @@ class ItemConfig:
                 logging.warn("Area %s could not be found, skipping ...", k)
                 continue
 
+            if area_name not in knowledge_base.area_eggs:
+                logging.warn("Area %s does not have golden eggs, skipping ...", k)
+                continue
+
             v_fixed = cls.fix_number(v)
             if v_fixed is None:
                 logging.warn("Given value %s for area %s will be skipped ...", v, k)
@@ -784,7 +788,7 @@ class ItemConfig:
                     for item_type, item_id in knowledge_base.item_name_map.get(
                         k_sanitized, []
                     )
-                    if item_type == 9
+                    if item_type == 9 and item_id in knowledge_base.drops["Crates"]
                 ]
 
                 if not crate_ids:
