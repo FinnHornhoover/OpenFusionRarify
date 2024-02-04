@@ -268,19 +268,31 @@ class ItemConfig:
                 mob_drop_id = knowledge_base.drops["Mobs"][mob_id]["MobDropID"]
 
                 if mob_drop_id not in knowledge_base.drops["MobDrops"]:
-                    logging.warn("Mob %s has no valid mob drops assigned, skipping ...", k)
+                    logging.warn(
+                        "Mob %s has no valid mob drops assigned, skipping ...", k
+                    )
                     continue
 
-                cdt_id = knowledge_base.drops["MobDrops"][mob_drop_id]["CrateDropTypeID"]
+                cdt_id = knowledge_base.drops["MobDrops"][mob_drop_id][
+                    "CrateDropTypeID"
+                ]
 
                 if cdt_id not in knowledge_base.drops["CrateDropTypes"]:
-                    logging.warn("Mob %s no valid crate drop type assigned, skipping ...", k)
+                    logging.warn(
+                        "Mob %s no valid crate drop type assigned, skipping ...", k
+                    )
                     continue
 
                 crate_ids = knowledge_base.drops["CrateDropTypes"][cdt_id]["CrateIDs"]
 
-                if any(crate_id not in knowledge_base.drops["Crates"] for crate_id in crate_ids):
-                    logging.warn("Mob %s has invalid crates in its crate drop type, skipping ...", k)
+                if any(
+                    crate_id not in knowledge_base.drops["Crates"]
+                    for crate_id in crate_ids
+                ):
+                    logging.warn(
+                        "Mob %s has invalid crates in its crate drop type, skipping ...",
+                        k,
+                    )
                     continue
 
             v_fixed = cls.fix_number(v)
@@ -485,19 +497,31 @@ class ItemConfig:
                 mob_drop_id = knowledge_base.drops["Mobs"][mob_id]["MobDropID"]
 
                 if mob_drop_id not in knowledge_base.drops["MobDrops"]:
-                    logging.warn("Mob %s has no valid mob drops assigned, skipping ...", k)
+                    logging.warn(
+                        "Mob %s has no valid mob drops assigned, skipping ...", k
+                    )
                     continue
 
-                cdt_id = knowledge_base.drops["MobDrops"][mob_drop_id]["CrateDropTypeID"]
+                cdt_id = knowledge_base.drops["MobDrops"][mob_drop_id][
+                    "CrateDropTypeID"
+                ]
 
                 if cdt_id not in knowledge_base.drops["CrateDropTypes"]:
-                    logging.warn("Mob %s no valid crate drop type assigned, skipping ...", k)
+                    logging.warn(
+                        "Mob %s no valid crate drop type assigned, skipping ...", k
+                    )
                     continue
 
                 crate_ids = knowledge_base.drops["CrateDropTypes"][cdt_id]["CrateIDs"]
 
-                if any(crate_id not in knowledge_base.drops["Crates"] for crate_id in crate_ids):
-                    logging.warn("Mob %s has invalid crates in its crate drop type, skipping ...", k)
+                if any(
+                    crate_id not in knowledge_base.drops["Crates"]
+                    for crate_id in crate_ids
+                ):
+                    logging.warn(
+                        "Mob %s has invalid crates in its crate drop type, skipping ...",
+                        k,
+                    )
                     continue
 
             if not isinstance(v, dict):
