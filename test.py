@@ -21,12 +21,12 @@ def generate_zero_rarity_patch(
 ) -> None:
     random.seed(ZR_SEED)
 
-    patch = {"ItemSets": defaultdict(dict)}
+    patch = {"ItemSets": defaultdict(lambda: defaultdict(dict))}
 
     for str_is_id, itemset in drops["ItemSets"].items():
         for ir_id in itemset["ItemReferenceIDs"]:
             if random.random() < prob:
-                patch["ItemSets"][str_is_id][str(ir_id)] = 0
+                patch["ItemSets"][str_is_id]["AlterRarityMap"][str(ir_id)] = 0
 
     patch_dir = output_path / patch_name
     patch_dir.mkdir(parents=True, exist_ok=True)
