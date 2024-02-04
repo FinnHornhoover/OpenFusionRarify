@@ -623,8 +623,10 @@ class CrateGroupNode:
             return
 
         # do not add ETC crates by default
-        default_crate_types = {1, 2, 3, 4} if len(self.crate_nodes) == 5 else {0}
-        crate_types = crate_types or default_crate_types
+        crate_types = {
+            min(crate_index, len(self.crate_nodes) - 1)
+            for crate_index in (crate_types or {1, 2, 3, 4})
+        }
 
         for crate_index in crate_types:
             crate_node = self.crate_nodes[crate_index]
@@ -787,9 +789,9 @@ class CrateGroupNode:
                     ].itemset.deepcopy()
                     is_id = self.knowledge_base.drops["ItemSets"].add(new_itemset)
 
-                    for ir_id in new_itemset["ItemReferenceIDs"]:
+                    for _ir_id in new_itemset["ItemReferenceIDs"]:
                         self.knowledge_base.drops.references[
-                            ("ItemReferences", ir_id)
+                            ("ItemReferences", _ir_id)
                         ].add(("ItemSets", is_id))
 
                 main_index = None
