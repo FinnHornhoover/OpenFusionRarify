@@ -111,7 +111,8 @@ class ItemSetNode:
         }
         total_weight = sum(weights_filtered.values())
         weights_scaled = {
-            ir_id: weight / total_weight for ir_id, weight in weights_filtered.items()
+            ir_id: weight * inv(total_weight, inf=0.0)
+            for ir_id, weight in weights_filtered.items()
         }
 
         if not target_weights:
@@ -136,7 +137,9 @@ class ItemSetNode:
             ir_id: (
                 target_weights_filtered[ir_id]
                 if ir_id in target_weights_filtered
-                else (1.0 - total_target_weight) * weight / total_non_target_weight
+                else (1.0 - total_target_weight)
+                * weight
+                * inv(total_non_target_weight, inf=0.0)
             )
             for ir_id, weight in weights_scaled.items()
         }
@@ -263,7 +266,9 @@ class ItemSetNode:
                 return 1, {**acc_dict, **other_dict}
 
             select_ir_id = shared_ir_ids[0]
-            scale_gcd = math.gcd(acc_dict[select_ir_id], other_dict[select_ir_id])
+            scale_gcd = max(
+                1, math.gcd(acc_dict[select_ir_id], other_dict[select_ir_id])
+            )
             other_to_scale = acc_dict[select_ir_id] // scale_gcd
             acc_to_scale = other_dict[select_ir_id] // scale_gcd
 
@@ -447,11 +452,25 @@ class CrateNode:
         item_gender_id = self.knowledge_base.item_map[item_tuple].get("m_iReqSex", 1)
         item_rarity_id = self.knowledge_base.item_map[item_tuple].get("m_iRarity", 1)
 
-        changed_rarity = max(
-            rarity_id
-            for rarity_id in self.allowed_rarities(item_gender_id)
-            if rarity_id <= item_rarity_id
-        )
+        rarities = self.allowed_rarities(item_gender_id)
+        lower_rarities = [
+            rarity_id for rarity_id in rarities if rarity_id <= item_rarity_id
+        ]
+        upper_rarities = [
+            rarity_id for rarity_id in rarities if rarity_id > item_rarity_id
+        ]
+
+        if lower_rarities:
+            changed_rarity = max(lower_rarities)
+        elif upper_rarities:
+            changed_rarity = min(upper_rarities)
+        else:
+            logging.warn(
+                "Could not inject item %s no viable rarity class found in CRATE %s",
+                ir_id,
+                self.c_id,
+            )
+
         self.itemset_node.register(ir_id=ir_id, changed_rarity_id=changed_rarity)
 
     def discount_explained_prob(self, ir_id: int, prob: float) -> float:
@@ -507,6 +526,7 @@ class CrateNode:
 
         rarity_agg = defaultdict(float)
 
+        # TODO: investigate why we include all weights here, not just allowed ones
         rw_weights = self.rarity_weights["Weights"]
         rw_sum = sum(self.allowed_rarities(gender_id).values())
 
@@ -520,7 +540,8 @@ class CrateNode:
                 },
             )
             for ir_id, weight in pool.items():
-                rarity_agg[ir_id] += weight * rw / rw_sum
+                # TODO: investigate why rw_sum = 0 cases get propagated
+                rarity_agg[ir_id] += weight * rw * inv(rw_sum, inf=0.0)
 
         return rarity_agg
 
@@ -630,7 +651,7 @@ class CrateGroupNode:
             discounted_prob = (
                 prob
                 * (cdwt / cdw[crate_index])
-                * (1.0 if ignore_any_crate_prob else 1.0 / any_crate_prob)
+                * inv(1.0 if ignore_any_crate_prob else any_crate_prob)
             )
 
         logging.debug(
@@ -879,7 +900,7 @@ class CrateGroupNode:
                 sum_probs += cdw[index] * crate_prob / cdwt
 
         return {
-            index: main_probs[index] * is_prob / sum_probs
+            index: main_probs[index] * is_prob * inv(sum_probs, inf=0.0)
             for index, is_prob in crate_injections.items()
         }
 
