@@ -11,20 +11,20 @@ from rarify.knowledge_base import KnowledgeBase
 from rarify.config import Config, ItemConfig, OTHER_STANDARD_ID, OTHER_STANDARD_KEYWORD
 
 
-def inv(a: float) -> float:
-    return 1.0 / a if a > 0.0 else float("inf")
+def inv(a: float, inf: float = float("inf")) -> float:
+    return 1.0 / a if a > 0.0 else inf
 
 
-def abs_diff(a: float, b: float) -> float:
-    if a == float("inf") and b == float("inf"):
+def abs_diff(a: float, b: float, inf: float = float("inf")) -> float:
+    if a == inf and b == inf:
         return 0.0
     return abs(a - b)
 
 
-def rel_diff(a: float, b: float) -> float:
-    if a == float("inf") and b == float("inf"):
+def rel_diff(a: float, b: float, inf: float = float("inf")) -> float:
+    if a == inf and b == inf:
         return 0.0
-    if b == float("inf"):
+    if b == inf:
         return 1.0
     return abs_diff(a, b) * inv(b)
 
@@ -1234,7 +1234,7 @@ def inject_racing_crate_type_freq_value(
             logging.warn(
                 "IZ %s %s CRATE type %s is not a valid reward, skipping ...",
                 epid,
-                racing["EPNAme"],
+                racing["EPName"],
                 crate_type,
             )
             continue
@@ -1293,6 +1293,9 @@ def inject_mission_freq_values(
     unused_levels = set(ckb.knowledge_base.mission_level_crate_id_map.keys())
 
     for level, freq in freq_per_mission_level.items():
+        if level == OTHER_STANDARD_ID:
+            continue
+
         prob = 1.0 / freq
 
         for crate_id in ckb.knowledge_base.mission_level_crate_id_map[level]:
