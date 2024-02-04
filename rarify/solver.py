@@ -281,13 +281,24 @@ class ItemSetNode:
 
         scales = {}
         weights = {}
+        scale_max = (1 << 31) - 1
 
         for gender_id, rarity_dict in merged_probs.items():
             scales[gender_id] = 1
             weights[gender_id] = {}
 
-            for prob_dict in rarity_dict.values():
-                scale = search(prob_dict)
+            for rarity_id, prob_dict in rarity_dict.items():
+                scale = search(prob_dict, lo=1, hi=scale_max)
+
+                if scale < 0:
+                    logging.warn(
+                        "The item set %s rarity %s weight total exceeded integer limit %s.",
+                        self.is_id,
+                        rarity_id,
+                        scale_max,
+                    )
+                    scale = scale_max
+
                 int_weights = apply_scale(prob_dict, scale)
 
                 multp, weights[gender_id] = merge_by_rarity(
@@ -295,6 +306,14 @@ class ItemSetNode:
                 )
                 # this is a heuristic, but we have to do something meaningless here to decide
                 scales[gender_id] = max(scales[gender_id] * multp, scale)
+
+            if scales[gender_id] > scale_max:
+                logging.warn(
+                    "The item set %s weight total exceeded integer limit %s.",
+                    self.is_id,
+                    scale_max,
+                )
+                scales[gender_id] = scale_max
 
         # where the true values of the gender are kept
         main_gender_id, _ = self.agg(list(scales.items()), key=itemgetter(1))
@@ -526,7 +545,6 @@ class CrateNode:
 
         rarity_agg = defaultdict(float)
 
-        # TODO: investigate why we include all weights here, not just allowed ones
         rw_weights = self.rarity_weights["Weights"]
         rw_sum = sum(self.allowed_rarities(gender_id).values())
 
@@ -540,7 +558,6 @@ class CrateNode:
                 },
             )
             for ir_id, weight in pool.items():
-                # TODO: investigate why rw_sum = 0 cases get propagated
                 rarity_agg[ir_id] += weight * rw * inv(rw_sum, inf=0.0)
 
         return rarity_agg
