@@ -1,8 +1,9 @@
 import math
 import json
 import logging
-from operator import itemgetter
+from math import exp
 from functools import wraps
+from operator import itemgetter
 from collections import defaultdict
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -11,22 +12,36 @@ from rarify.knowledge_base import KnowledgeBase
 from rarify.config import Config, ItemConfig, OTHER_STANDARD_ID, OTHER_STANDARD_KEYWORD
 
 
-def inv(a: float, inf: float = float("inf")) -> float:
+def inv(a: float, inf: float = math.inf) -> float:
     return 1.0 / a if a > 0.0 else inf
 
 
-def abs_diff(a: float, b: float, inf: float = float("inf")) -> float:
+def abs_diff(a: float, b: float, inf: float = math.inf) -> float:
     if a == inf and b == inf:
         return 0.0
     return abs(a - b)
 
 
-def rel_diff(a: float, b: float, inf: float = float("inf")) -> float:
+def rel_diff(a: float, b: float, inf: float = math.inf) -> float:
     if a == inf and b == inf:
         return 0.0
     if b == inf:
         return 1.0
     return abs_diff(a, b) * inv(b)
+
+
+def ln(a: float, ninf: float = -math.inf) -> float:
+    return math.log(a) if a > 0.0 else ninf
+
+
+def logsumexp(d: Dict[int, float]) -> float:
+    max_val = max(d.values())
+    return max_val + ln(sum([exp(val - max_val) for val in d.values()]), ninf=0.0)
+
+
+def normalize(d: Dict[int, float]) -> Dict[int, float]:
+    s = sum(d.values())
+    return {k: v * inv(s, inf=0.0) for k, v in d.items()}
 
 
 def log_entry_end(func):
@@ -109,11 +124,7 @@ class ItemSetNode:
                 and self.effective_rarity_id(ir_id) in [0, rarity_id]
             )
         }
-        total_weight = sum(weights_filtered.values())
-        weights_scaled = {
-            ir_id: weight * inv(total_weight, inf=0.0)
-            for ir_id, weight in weights_filtered.items()
-        }
+        weights_scaled = normalize(weights_filtered)
 
         if not target_weights:
             return weights_scaled
@@ -198,7 +209,11 @@ class ItemSetNode:
                             if other_ir_id != ir_id
                         ]
                     )
-                    success = other_probs_sum + prob <= 1.0
+                    success = (
+                        success
+                        and other_probs_sum + prob <= 1.0
+                        and ir_id in self.itemset["ItemReferenceIDs"]
+                    )
 
         return success
 
@@ -489,6 +504,7 @@ class CrateNode:
                 ir_id,
                 self.c_id,
             )
+            return
 
         self.itemset_node.register(ir_id=ir_id, changed_rarity_id=changed_rarity)
 
@@ -511,7 +527,7 @@ class CrateNode:
             rw_sum = sum(self.allowed_rarities(gender_id).values())
 
             if len(rw_weights) < rarity_id or rw_weights[rarity_id - 1] == 0:
-                discounted_prob = float("inf")
+                discounted_prob = math.inf
                 logging.debug(
                     "Item %s probability %s is inf due to rarity_id %s and weights %s from crate %s to item set %s",
                     ir_id,
@@ -540,8 +556,9 @@ class CrateNode:
         gender_id: int,
         target_weights: Optional[Dict[int, float]] = None,
     ) -> Dict[int, float]:
-        for ir_id in target_weights or {}:
-            self.register(ir_id)
+        for ir_id, prob in (target_weights or {}).items():
+            if prob > 0.0:
+                self.register(ir_id)
 
         rarity_agg = defaultdict(float)
 
@@ -563,14 +580,15 @@ class CrateNode:
         return rarity_agg
 
     def inject(self, ir_id: int, prob: float) -> None:
-        self.register(ir_id)
-        self.itemset_node.inject(
-            ir_id=ir_id,
-            prob=self.discount_explained_prob(ir_id, prob),
-        )
+        if self.preview_inject(ir_id=ir_id, prob=prob):
+            self.itemset_node.inject(
+                ir_id=ir_id,
+                prob=self.discount_explained_prob(ir_id, prob),
+            )
 
     def preview_inject(self, ir_id: int, prob: float) -> bool:
-        self.register(ir_id)
+        if prob > 0.0:
+            self.register(ir_id)
         return self.itemset_node.preview_inject(
             ir_id=ir_id,
             prob=self.discount_explained_prob(ir_id, prob),
@@ -648,7 +666,11 @@ class CrateGroupNode:
         for crate_index in crate_types:
             crate_node = self.crate_nodes[crate_index]
 
-            crate_node.register(ir_id=ir_id)
+            crate_gender_id = crate_node.itemset_node.effective_gender_id(ir_id)
+            crate_rarity_id = crate_node.itemset_node.effective_rarity_id(ir_id)
+            # only inject if the exact rarity is available here
+            if crate_rarity_id in crate_node.allowed_rarities(crate_gender_id):
+                crate_node.register(ir_id=ir_id)
 
             if ir_id not in self.ir_is_ids:
                 self.ir_is_ids = set()
@@ -665,7 +687,7 @@ class CrateGroupNode:
         cdwt = sum(cdw)
 
         if len(cdw) < crate_index + 1 or cdw[crate_index] == 0:
-            discounted_prob = float("inf")
+            discounted_prob = math.inf
         else:
             discounted_prob = (
                 prob
@@ -747,24 +769,41 @@ class CrateGroupNode:
                     freq_groups[item_freq].append(index)
 
             # stable sort strats
+            left_out_indices = []
             for index in indices:
                 if index not in fixed_crate_target_probs:
                     continue
 
                 crate_node = self.crate_nodes[index]
                 # this may not work for rarity_id=0
-                item_freq = inv(
-                    self.agg(
-                        [
+                prob_list = []
+                for gender_id in range(1, 3):
+                    weights = crate_node.drop_pool(gender_id=gender_id)
+                    if ir_id in weights:
+                        prob_list.append(
                             crate_node.discount_explained_prob(ir_id, weights[ir_id])
-                            for gender_id in range(1, 3)
-                            for weights in [crate_node.drop_pool(gender_id=gender_id)]
-                            if ir_id in weights
-                        ]
-                    )
-                )
+                        )
+
+                # crate doesn't or cannot contain item
+                if not prob_list:
+                    left_out_indices.append(index)
+                    continue
+
+                item_freq = inv(self.agg(prob_list))
+
+                # if later crates of the same itemset can contain the item
+                # group them with this one
+                for loi in left_out_indices:
+                    groups_append(item_freq, loi)
+                left_out_indices.clear()
+
                 groups_append(item_freq, index)
 
+            # if all crates were skipped, it means we cannot drop this item
+            for loi in left_out_indices:
+                groups_append(math.inf, loi)
+
+            # now group up the changes requested
             for index in indices:
                 if index not in fixed_crate_target_probs:
                     continue
@@ -784,12 +823,14 @@ class CrateGroupNode:
                 ):
                     groups_append(desired_freq, index)
 
+            # eliminate empty groups
             freq_groups = {
                 freq: freq_group
                 for freq, freq_group in freq_groups.items()
                 if freq_group
             }
 
+            # sort the largest groups to the top
             # in the case of a tie, this should still leave the original group at the top
             sorted_freq_groups = sorted(
                 freq_groups.items(),
@@ -797,6 +838,7 @@ class CrateGroupNode:
                 reverse=True,
             )
 
+            # index and is_id management
             for i, (freq, freq_group) in enumerate(sorted_freq_groups):
                 if i == 0:
                     is_id = current_is_id
@@ -854,6 +896,7 @@ class CrateGroupNode:
                 else:
                     groups[main_index] = crate_prob
 
+        # refresh the state
         self.refresh_crates()
 
         return groups
@@ -930,12 +973,15 @@ class CrateGroupNode:
         ignore_any_crate_prob: bool = False,
     ) -> None:
         if isinstance(prob, dict):
-            self.register(ir_id=ir_id, crate_types=set(prob.keys()))
+            self.register(
+                ir_id=ir_id, crate_types={i for i, p in prob.items() if p > 0.0}
+            )
             crate_injections = self.generate_split_injections(
                 ir_id=ir_id, crate_target_probs=prob
             )
         else:
-            self.register(ir_id=ir_id)
+            if prob > 0.0:
+                self.register(ir_id=ir_id)
             crate_injections = self.generate_whole_injections(
                 ir_id=ir_id, prob=prob, ignore_any_crate_prob=ignore_any_crate_prob
             )
