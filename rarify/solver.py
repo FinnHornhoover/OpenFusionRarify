@@ -431,6 +431,44 @@ class ItemSetNode:
             "ItemSet %s int weights %s", self.is_id, json.dumps(int_weights, indent=4)
         )
 
+        int_split_probs = {
+            gender_id: {
+                rarity_id: normalize({ir_id: int_weights[ir_id] for ir_id in pool_dict})
+                for rarity_id, pool_dict in rarity_dicts.items()
+            }
+            for gender_id, rarity_dicts in clean_merged_probs.items()
+        }
+        weight_differences = {
+            gender_id: {
+                rarity_id: {
+                    ir_id: {
+                        "scaled": int_split_probs[gender_id][rarity_id][ir_id],
+                        "true": prob,
+                    }
+                    for ir_id, prob in pool_dict.items()
+                    if rel_diff(
+                        inv(int_split_probs[gender_id][rarity_id][ir_id]),
+                        inv(prob),
+                    )
+                    >= self.rel_tol
+                }
+                for rarity_id, pool_dict in rarity_dicts.items()
+            }
+            for gender_id, rarity_dicts in clean_merged_probs.items()
+        }
+
+        logging.debug(
+            "ItemSet %s weight diffs %s",
+            self.is_id,
+            json.dumps(weight_differences, indent=4),
+        )
+
+        logging.debug(
+            "ItemSet %s final probs %s",
+            self.is_id,
+            json.dumps(int_split_probs, indent=4),
+        )
+
         self.adjust_weight_settings(int_weights)
 
 
