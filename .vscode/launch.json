@@ -10,6 +10,13 @@
       "request": "launch",
       "module": "main",
       "justMyCode": true
+    },
+    {
+      "name": "Python: Hypothesis",
+      "type": "python",
+      "request": "launch",
+      "module": "hypo_test",
+      "justMyCode": true
     }
   ]
 }

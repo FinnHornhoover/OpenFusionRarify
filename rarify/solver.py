@@ -251,98 +251,157 @@ class ItemSetNode:
         def apply_scale(prob_dict: Dict[int, float], scale: int) -> Dict[int, int]:
             return {ir_id: int(scale * value) for ir_id, value in prob_dict.items()}
 
+        def merge(
+            acc_dict: Dict[int, float], other_dict: Dict[int, float]
+        ) -> Dict[int, float]:
+            cur_acc_dict = acc_dict.copy()
+            cur_other_dict = other_dict.copy()
+
+            shared_ir_ids = [
+                ir_id
+                for ir_id, acc_value in cur_acc_dict.items()
+                if (
+                    ir_id in cur_other_dict
+                    and acc_value > -math.inf
+                    and cur_other_dict[ir_id] > -math.inf
+                    and acc_value < 0.0
+                    and cur_other_dict[ir_id] < 0.0
+                    # do not consider altered values
+                    and all(
+                        ir_id not in pool_dict
+                        for rarity_dicts in self.probs_to_change.values()
+                        for pool_dict in rarity_dicts.values()
+                    )
+                )
+            ]
+
+            if shared_ir_ids:
+                select_ir_id = shared_ir_ids[0]
+                other_to_scale = cur_acc_dict[select_ir_id]
+                acc_to_scale = cur_other_dict[select_ir_id]
+                cur_other_dict = {
+                    ir_id: (
+                        # copy over values for automatically 1.0 or 0.0-ed out probabilities
+                        cur_acc_dict[ir_id]
+                        if (value == -math.inf or value == 0.0)
+                        and ir_id in cur_acc_dict
+                        else value + other_to_scale - acc_to_scale
+                    )
+                    for ir_id, value in cur_other_dict.items()
+                }
+
+            if cur_other_dict:
+                log_sum = logsumexp(cur_other_dict)
+                cur_acc_dict = {
+                    ir_id: value - log_sum for ir_id, value in cur_acc_dict.items()
+                }
+                cur_other_dict = {
+                    ir_id: value - log_sum for ir_id, value in cur_other_dict.items()
+                }
+
+            return {**cur_acc_dict, **cur_other_dict}
+
         def search(
-            prob_dict: Dict[int, float], lo: int = 1, hi: int = (1 << 31) - 1
+            split_probs: Dict[int, Dict[int, Dict[int, float]]], lo: int, hi: int
         ) -> int:
             if hi < lo:
                 return -1
 
             mi = (lo + hi) // 2
 
-            current_values = apply_scale(prob_dict, mi)
-            cur_sum = sum(current_values.values())
-
-            if all(
-                rel_diff(cur_sum * inv(value), inv(prob_dict[ir_id])) < self.rel_tol
-                for ir_id, value in current_values.items()
-            ):
-                left = search(prob_dict, lo, mi - 1)
-                return mi if left == -1 else left
-
-            return search(prob_dict, mi + 1, hi)
-
-        def merge_by_rarity(
-            acc_dict: Dict[int, int],
-            other_dict: Dict[int, int],
-        ) -> Tuple[int, Dict[int, int]]:
-            shared_ir_ids = list(set(acc_dict.keys()).intersection(other_dict))
-
-            if not shared_ir_ids:
-                return 1, {**acc_dict, **other_dict}
-
-            select_ir_id = shared_ir_ids[0]
-            scale_gcd = max(
-                1, math.gcd(acc_dict[select_ir_id], other_dict[select_ir_id])
-            )
-            other_to_scale = acc_dict[select_ir_id] // scale_gcd
-            acc_to_scale = other_dict[select_ir_id] // scale_gcd
-
-            return acc_to_scale, {
-                **{ir_id: value * acc_to_scale for ir_id, value in acc_dict.items()},
-                **{
-                    ir_id: value * other_to_scale for ir_id, value in other_dict.items()
-                },
+            current_probs = {
+                gender_id: {
+                    rarity_id: normalize(apply_scale(pool_dict, mi))
+                    for rarity_id, pool_dict in rarity_dicts.items()
+                }
+                for gender_id, rarity_dicts in split_probs.items()
             }
 
-        scales = {}
-        weights = {}
-        scale_max = (1 << 31) - 1
+            if all(
+                rel_diff(
+                    inv(value),
+                    inv(split_probs[gender_id][rarity_id][ir_id]),
+                )
+                < self.rel_tol
+                for gender_id, rarity_dicts in current_probs.items()
+                for rarity_id, pool_dict in rarity_dicts.items()
+                for ir_id, value in pool_dict.items()
+            ):
+                left = search(split_probs, lo, mi - 1)
+                return mi if left == -1 else left
 
-        for gender_id, rarity_dict in merged_probs.items():
-            scales[gender_id] = 1
-            weights[gender_id] = {}
+            return search(split_probs, mi + 1, hi)
 
-            for rarity_id, prob_dict in rarity_dict.items():
-                scale = search(prob_dict, lo=1, hi=scale_max)
+        def correct_zero_weights(int_weights: Dict[int, int]) -> Dict[int, int]:
+            int_scaled_weights = int_weights.copy()
 
-                if scale < 0:
-                    logging.warn(
-                        "The item set %s rarity %s weight total exceeded integer limit %s.",
-                        self.is_id,
-                        rarity_id,
-                        scale_max,
+            for ir_id in int_scaled_weights:
+                if int_scaled_weights[ir_id] == 0:
+                    max_weight_ir_id, _ = max(
+                        int_scaled_weights.items(), key=itemgetter(1)
                     )
-                    scale = scale_max
+                    int_scaled_weights[ir_id] = 1
+                    int_scaled_weights[max_weight_ir_id] -= 1
 
-                int_weights = apply_scale(prob_dict, scale)
+            return int_scaled_weights
 
-                multp, weights[gender_id] = merge_by_rarity(
-                    weights[gender_id], int_weights
-                )
-                # this is a heuristic, but we have to do something meaningless here to decide
-                scales[gender_id] = max(scales[gender_id] * multp, scale)
+        log_scaled_weights = {}
+        for rarity_dicts in merged_probs.values():
+            gender_scaled_weights = {}
 
-            if scales[gender_id] > scale_max:
-                logging.warn(
-                    "The item set %s weight total exceeded integer limit %s.",
-                    self.is_id,
-                    scale_max,
-                )
-                scales[gender_id] = scale_max
+            for pool_dict in rarity_dicts.values():
+                log_pool_dict = {ir_id: ln(value) for ir_id, value in pool_dict.items()}
+                gender_scaled_weights = merge(gender_scaled_weights, log_pool_dict)
 
-        # where the true values of the gender are kept
-        main_gender_id, _ = self.agg(list(scales.items()), key=itemgetter(1))
-        # where all other items are dumped from
-        other_gender_id = 1 if main_gender_id == 2 else 2
+            log_scaled_weights = merge(log_scaled_weights, gender_scaled_weights)
 
-        return {
-            **weights[other_gender_id],
-            **{
-                ir_id: value
-                for ir_id, value in weights[main_gender_id].items()
-                if self.effective_gender_id(ir_id) == main_gender_id
-            },
+        log_split_weights = {
+            gender_id: {
+                rarity_id: {ir_id: log_scaled_weights[ir_id] for ir_id in pool_dict}
+                for rarity_id, pool_dict in rarity_dicts.items()
+            }
+            for gender_id, rarity_dicts in merged_probs.items()
         }
+        max_split_sum = max(
+            [
+                logsumexp(pool_dict)
+                for rarity_dicts in log_split_weights.values()
+                for pool_dict in rarity_dicts.values()
+                if pool_dict
+            ]
+        )
+        rescaled_weights = {
+            ir_id: exp(value - max_split_sum)
+            for ir_id, value in log_scaled_weights.items()
+        }
+        split_weights = {
+            gender_id: {
+                rarity_id: {ir_id: rescaled_weights[ir_id] for ir_id in pool_dict}
+                for rarity_id, pool_dict in rarity_dicts.items()
+            }
+            for gender_id, rarity_dicts in merged_probs.items()
+        }
+        split_probs = {
+            gender_id: {
+                rarity_id: normalize(pool_dict)
+                for rarity_id, pool_dict in rarity_dicts.items()
+            }
+            for gender_id, rarity_dicts in split_weights.items()
+        }
+
+        scale_max = (1 << 31) - 1
+        int_scale = search(split_probs, lo=1, hi=scale_max)
+        if int_scale < 0:
+            logging.warn(
+                "The item set %s weight total exceeded integer limit %s. "
+                "The most and least rare items may have their probabilities altered.",
+                self.is_id,
+                scale_max,
+            )
+            int_scale = scale_max
+
+        int_weights = apply_scale(rescaled_weights, int_scale)
+        return correct_zero_weights(int_weights)
 
     def adjust_weight_settings(self, weights: Dict[int, int]) -> None:
         counts = defaultdict(int)

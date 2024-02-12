@@ -1,3 +1,4 @@
 black
 PyYAML
 pyinstaller
+hypothesis
