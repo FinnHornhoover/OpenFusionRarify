@@ -140,13 +140,18 @@ class ItemConfig:
         item_name = data_sanitized.get("name")
 
         if _type and isinstance(_type, str):
-            _type = knowledge_base.type_name_id_map.get(sanitize_key(_type))
+            type_name = knowledge_base.item_type_name_to_item_type_map.get(
+                sanitize_key(_type)
+            )
+            _type = knowledge_base.item_type_to_item_type_id_map.get(type_name)
 
         item_tuple = (_type, _id)
         found_tuple = (None, None)
 
         if item_name:
-            found_tuples = knowledge_base.item_name_map.get(sanitize_key(item_name))
+            found_tuples = knowledge_base.item_name_to_tuples_map.get(
+                sanitize_key(item_name)
+            )
             found_tuple = found_tuples[0]
             if len(found_tuples) > 1:
                 logging.warn(
@@ -178,7 +183,7 @@ class ItemConfig:
 
         type_id, item_id = item_tuple
 
-        type_name = knowledge_base.type_id_name_map.get(type_id)
+        type_name = knowledge_base.item_type_id_to_item_type_map.get(type_id)
         if type_name is None:
             logging.warn(
                 "Type name could not be identified: %s, skipping ...", data_sanitized
@@ -241,7 +246,9 @@ class ItemConfig:
                 else:
                     mob_ids = [
                         mob_id
-                        for mob_id in knowledge_base.npc_name_map.get(k_sanitized, [])
+                        for mob_id in knowledge_base.npc_name_to_npc_ids_map.get(
+                            k_sanitized, []
+                        )
                         if mob_id in knowledge_base.loaded_mobs
                     ]
 
@@ -333,7 +340,10 @@ class ItemConfig:
                 if k_sanitized in OTHER_KEYWORDS:
                     event_id = OTHER_STANDARD_ID
                 else:
-                    event_id = knowledge_base.event_name_id_map.get(k_sanitized)
+                    event_type = knowledge_base.event_name_to_event_type_map.get(
+                        k_sanitized
+                    )
+                    event_id = knowledge_base.event_type_to_event_id_map.get(event_type)
 
                 if event_id is None:
                     logging.warn("Event %s could not be found, skipping ...", k)
@@ -422,7 +432,9 @@ class ItemConfig:
             if k_sanitized in OTHER_KEYWORDS:
                 crate_name = OTHER_STANDARD_KEYWORD
             else:
-                crate_name = knowledge_base.crate_name_map.get(k_sanitized)
+                crate_name = knowledge_base.crate_type_name_to_crate_type_map.get(
+                    k_sanitized
+                )
 
             if crate_name is None:
                 logging.warn("CRATE type %s could not be found, skipping ...", k)
@@ -470,7 +482,9 @@ class ItemConfig:
                 else:
                     mob_ids = [
                         mob_id
-                        for mob_id in knowledge_base.npc_name_map.get(k_sanitized, [])
+                        for mob_id in knowledge_base.npc_name_to_npc_ids_map.get(
+                            k_sanitized, []
+                        )
                         if mob_id in knowledge_base.loaded_mobs
                     ]
 
@@ -568,7 +582,9 @@ class ItemConfig:
             if k_sanitized in OTHER_KEYWORDS:
                 crate_name = OTHER_STANDARD_KEYWORD
             else:
-                crate_name = knowledge_base.crate_name_map.get(k_sanitized)
+                crate_name = knowledge_base.crate_type_name_to_crate_type_map.get(
+                    k_sanitized
+                )
 
             if crate_name is None:
                 logging.warn("CRATE type %s could not be found, skipping ...", k)
@@ -643,7 +659,7 @@ class ItemConfig:
                 if k_sanitized in OTHER_KEYWORDS:
                     epid = OTHER_STANDARD_ID
                 else:
-                    epid = knowledge_base.iz_name_id_map.get(k_sanitized)
+                    epid = knowledge_base.iz_name_to_epid_map.get(k_sanitized)
 
                 if epid is None:
                     logging.warn("IZ %s could not be found, skipping ...", k)
@@ -847,7 +863,7 @@ class ItemConfig:
 
                 crate_ids = [
                     item_id
-                    for item_type, item_id in knowledge_base.item_name_map.get(
+                    for item_type, item_id in knowledge_base.item_name_to_tuples_map.get(
                         k_sanitized, []
                     )
                     if item_type == 9 and item_id in knowledge_base.drops["Crates"]

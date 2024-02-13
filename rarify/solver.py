@@ -75,8 +75,10 @@ class ItemSetNode:
 
         self.itemset: Data = knowledge_base.drops["ItemSets"][is_id]
         self.probs_to_change = {
-            gender_id: {rarity_id: {} for rarity_id in range(1, 5)}
-            for gender_id in range(1, 3)
+            gender_id: {
+                rarity_id: {} for rarity_id in knowledge_base.rarity_map.values()
+            }
+            for gender_id in knowledge_base.gender_map.values()
         }
 
     def effective_rarity_id(self, ir_id: int) -> int:
@@ -84,9 +86,9 @@ class ItemSetNode:
             return 0
         return self.itemset["AlterRarityMap"].get(
             str(ir_id),
-            self.knowledge_base.item_map[self.knowledge_base.irid_tuple_map[ir_id]].get(
-                "m_iRarity", 0
-            ),
+            self.knowledge_base.item_map[
+                self.knowledge_base.ir_id_to_tuple_map[ir_id]
+            ].get("m_iRarity", 0),
         )
 
     def effective_gender_id(self, ir_id: int) -> int:
@@ -94,9 +96,9 @@ class ItemSetNode:
             return 0
         return self.itemset["AlterGenderMap"].get(
             str(ir_id),
-            self.knowledge_base.item_map[self.knowledge_base.irid_tuple_map[ir_id]].get(
-                "m_iReqSex", 0
-            ),
+            self.knowledge_base.item_map[
+                self.knowledge_base.ir_id_to_tuple_map[ir_id]
+            ].get("m_iReqSex", 0),
         )
 
     def register(self, ir_id: int, changed_rarity_id: int) -> None:
@@ -226,8 +228,8 @@ class ItemSetNode:
             for ir_id in self.itemset["ItemReferenceIDs"]
             if all(
                 prob_dict[ir_id] == 0.0
-                for rarity_dict in merged_probs.values()
-                for prob_dict in rarity_dict.values()
+                for rarity_dicts in merged_probs.values()
+                for prob_dict in rarity_dicts.values()
                 if ir_id in prob_dict
             )
         }
@@ -239,9 +241,9 @@ class ItemSetNode:
                     for ir_id, value in prob_dict.items()
                     if ir_id not in zero_entries
                 }
-                for rarity_id, prob_dict in rarity_dict.items()
+                for rarity_id, prob_dict in rarity_dicts.items()
             }
-            for gender_id, rarity_dict in merged_probs.items()
+            for gender_id, rarity_dicts in merged_probs.items()
         }
 
     def get_scaled_int_weights(
@@ -565,7 +567,10 @@ class CrateNode:
     def allowed_rarities(self, gender_id: int) -> Dict[int, int]:
         return {
             rarity_id: weight
-            for rarity_id, weight in zip(range(1, 5), self.rarity_weights["Weights"])
+            for rarity_id, weight in zip(
+                self.knowledge_base.rarity_map.values(),
+                self.rarity_weights["Weights"],
+            )
             if (
                 weight > 0
                 and any(
@@ -579,7 +584,7 @@ class CrateNode:
         }
 
     def register(self, ir_id: int) -> None:
-        item_tuple = self.knowledge_base.irid_tuple_map[ir_id]
+        item_tuple = self.knowledge_base.ir_id_to_tuple_map[ir_id]
         item_gender_id = self.knowledge_base.item_map[item_tuple].get("m_iReqSex", 1)
         item_rarity_id = self.knowledge_base.item_map[item_tuple].get("m_iRarity", 1)
 
@@ -662,7 +667,7 @@ class CrateNode:
         rw_weights = self.rarity_weights["Weights"]
         rw_sum = sum(self.allowed_rarities(gender_id).values())
 
-        for rarity_id, rw in zip(range(1, 5), rw_weights):
+        for rarity_id, rw in zip(self.knowledge_base.rarity_map.values(), rw_weights):
             pool = self.itemset_node.drop_pool(
                 rarity_id=rarity_id,
                 gender_id=gender_id,
@@ -750,7 +755,8 @@ class CrateGroupNode:
 
     def register(self, ir_id: int, crate_types: Optional[Set[int]] = None) -> None:
         if not crate_types and any(
-            ir_id in self.drop_pool(gender_id=gender_id) for gender_id in range(1, 3)
+            ir_id in self.drop_pool(gender_id=gender_id)
+            for gender_id in self.knowledge_base.gender_map.values()
         ):
             return
 
@@ -874,7 +880,7 @@ class CrateGroupNode:
                 crate_node = self.crate_nodes[index]
                 # this may not work for rarity_id=0
                 prob_list = []
-                for gender_id in range(1, 3):
+                for gender_id in self.knowledge_base.gender_map.values():
                     weights = crate_node.drop_pool(gender_id=gender_id)
                     if ir_id in weights:
                         prob_list.append(
@@ -1181,9 +1187,9 @@ class ConfigKnowledgeBase:
 
     def get_ir_id(self, item_config: ItemConfig) -> int:
         item_tuple = (item_config.type, item_config.id)
-        ir_id = self.knowledge_base.tuple_irid_map.get(item_tuple)
+        ir_id = self.knowledge_base.tuple_to_ir_id_map.get(item_tuple)
 
-        if item_tuple not in self.knowledge_base.tuple_irid_map:
+        if item_tuple not in self.knowledge_base.tuple_to_ir_id_map:
             ir_id = self.knowledge_base.drops["ItemReferences"].add(
                 {
                     "ItemReferenceID": -1,
@@ -1191,8 +1197,8 @@ class ConfigKnowledgeBase:
                     "Type": item_config.type,
                 }
             )
-            self.knowledge_base.tuple_irid_map[item_tuple] = ir_id
-            self.knowledge_base.irid_tuple_map[ir_id] = item_tuple
+            self.knowledge_base.tuple_to_ir_id_map[item_tuple] = ir_id
+            self.knowledge_base.ir_id_to_tuple_map[ir_id] = item_tuple
 
         return ir_id
 
@@ -1300,7 +1306,7 @@ def inject_crate_type_freq_value(
         if crate_type == OTHER_STANDARD_KEYWORD:
             continue
 
-        crate_index = ckb.knowledge_base.crate_name_order_map[crate_type]
+        crate_index = ckb.knowledge_base.crate_type_to_crate_order_map[crate_type]
         value = 1.0 / freq
 
         if crate_index in crate_target_probs:
@@ -1334,7 +1340,7 @@ def inject_crate_type_freq_value(
         }
 
         for crate_type in other_crate_types:
-            crate_index = ckb.knowledge_base.crate_name_order_map[crate_type]
+            crate_index = ckb.knowledge_base.crate_type_to_crate_order_map[crate_type]
             crate_target_probs.setdefault(crate_index, value)
 
     found_tuples = (
@@ -1403,7 +1409,7 @@ def inject_racing_crate_type_freq_value(
 ) -> None:
     racing = ckb.knowledge_base.drops["Racing"][epid]
     allowed_crate_types = {
-        ckb.knowledge_base.crate_order_name_map[i]: crate_id
+        ckb.knowledge_base.crate_order_to_crate_type_map[i]: crate_id
         for i, crate_id in enumerate(reversed(racing["Rewards"]))
         if crate_id > 0
     }
@@ -1441,7 +1447,7 @@ def inject_racing_freq_value(
     ir_id: int,
     freq_per_iz_and_crate: Dict[int, Dict[str, float]],
 ) -> None:
-    unused_izs = set(ckb.knowledge_base.iz_name_id_map.values())
+    unused_izs = set(ckb.knowledge_base.iz_name_to_epid_map.values())
 
     for epid, freq_per_crate_type in freq_per_iz_and_crate.items():
         if epid == OTHER_STANDARD_ID:
@@ -1808,10 +1814,7 @@ def log_output_freqs(
                     all_tuples.add((cdc_id, cdt_id))
 
     for tpl in all_tuples:
-        all_prob_info = {
-            "Boys": {},
-            "Girls": {},
-        }
+        all_prob_info = {}
         mob_ids = ckb.crate_drop_m_ids.get(tpl, set())
         event_ids = ckb.crate_drop_e_ids.get(tpl, set())
 
@@ -1823,7 +1826,7 @@ def log_output_freqs(
             for mob_id in sorted(mob_ids)
         )
         event_text = ", ".join(
-            f"event {ckb.knowledge_base.event_id_name_map[event_id]} ({event_id})"
+            f"event {ckb.knowledge_base.event_id_to_event_type_map[event_id]} ({event_id})"
             for event_id in sorted(event_ids)
         )
         desc_text = " and ".join(s for s in [mob_text, event_text] if s)
@@ -1836,47 +1839,45 @@ def log_output_freqs(
             if is_id in all_crates:
                 del all_crates[is_id]
 
-        for i, gender_name in enumerate(all_prob_info.keys()):
-            for ir_id, prob in cgn.drop_pool(gender_id=(i + 1)).items():
-                item_tuple = ckb.knowledge_base.irid_tuple_map[ir_id]
+        for gender_type, gender_id in ckb.knowledge_base.gender_map.items():
+            all_prob_info[gender_type] = {}
+            for ir_id, prob in cgn.drop_pool(gender_id=gender_id).items():
+                item_tuple = ckb.knowledge_base.ir_id_to_tuple_map[ir_id]
                 item_info = ckb.knowledge_base.item_map[item_tuple]
                 item_str = f"{item_info['m_strName'].strip()} {item_tuple}"
 
                 current_prob = (
                     prob
-                    + all_prob_info[gender_name].get(item_str, {"Probability": 0.0})[
+                    + all_prob_info[gender_type].get(item_str, {"Probability": 0.0})[
                         "Probability"
                     ]
                 )
                 freq = inv(current_prob)
                 freq_crates = freq * any_crate_prob
 
-                all_prob_info[gender_name][item_str] = {
+                all_prob_info[gender_type][item_str] = {
                     "Probability": current_prob,
                     "Kills to Item": round(freq, 2),
                     "Crates to Item": round(freq_crates, 2),
                 }
 
         all_prob_info = {
-            gender_name: dict(
+            gender_type: dict(
                 sorted(gender_dict.items(), key=lambda t: t[1]["Probability"])
             )
-            for gender_name, gender_dict in all_prob_info.items()
+            for gender_type, gender_dict in all_prob_info.items()
         }
 
         logging.info(
-            "Final values for %s: %s\nBoys Sum: %s Girls Sum: %s",
+            "Final values for %s: %s\nBoy Sum: %s Girl Sum: %s",
             desc_text,
             json.dumps(all_prob_info, indent=4),
-            sum(prob["Probability"] for prob in all_prob_info["Boys"].values()),
-            sum(prob["Probability"] for prob in all_prob_info["Girls"].values()),
+            sum(prob["Probability"] for prob in all_prob_info["Boy"].values()),
+            sum(prob["Probability"] for prob in all_prob_info["Girl"].values()),
         )
 
     for is_id, c_ids in all_crates.items():
-        all_prob_info = {
-            "Boys": {},
-            "Girls": {},
-        }
+        all_prob_info = {}
         desc_text = ""
 
         for c_id in c_ids:
@@ -1888,37 +1889,37 @@ def log_output_freqs(
                 ", ".join(map(str, sorted(c_ids))),
             )
 
-            for gender_id, gender_name in {1: "Boys", 2: "Girls"}.items():
-                all_prob_info[gender_name] = {}
+            for gender_type, gender_id in ckb.knowledge_base.gender_map.items():
+                all_prob_info[gender_type] = {}
                 for ir_id, prob in crate_node.drop_pool(gender_id=gender_id).items():
-                    item_tuple = ckb.knowledge_base.irid_tuple_map[ir_id]
+                    item_tuple = ckb.knowledge_base.ir_id_to_tuple_map[ir_id]
                     item_info = ckb.knowledge_base.item_map[item_tuple]
                     item_str = f"{item_info['m_strName'].strip()} {item_tuple}"
 
                     current_prob = (
                         prob
-                        + all_prob_info[gender_name].get(
+                        + all_prob_info[gender_type].get(
                             item_str, {"Probability": 0.0}
                         )["Probability"]
                     )
                     freq = inv(current_prob)
 
-                    all_prob_info[gender_name][item_str] = {
+                    all_prob_info[gender_type][item_str] = {
                         "Probability": current_prob,
                         "Number of this type of CRATE to Item": round(freq, 2),
                     }
 
         all_prob_info = {
-            gender_name: dict(
+            gender_type: dict(
                 sorted(gender_dict.items(), key=lambda t: t[1]["Probability"])
             )
-            for gender_name, gender_dict in all_prob_info.items()
+            for gender_type, gender_dict in all_prob_info.items()
         }
 
         logging.info(
-            "Final values for %s: %s\nBoys Sum: %s Girls Sum: %s",
+            "Final values for %s: %s\nBoy Sum: %s Girl Sum: %s",
             desc_text,
             json.dumps(all_prob_info, indent=4),
-            sum(prob["Probability"] for prob in all_prob_info["Boys"].values()),
-            sum(prob["Probability"] for prob in all_prob_info["Girls"].values()),
+            sum(prob["Probability"] for prob in all_prob_info["Boy"].values()),
+            sum(prob["Probability"] for prob in all_prob_info["Girl"].values()),
         )
