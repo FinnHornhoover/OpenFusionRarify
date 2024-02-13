@@ -27,12 +27,16 @@ def main() -> None:
         format="[%(levelname)7s @ %(asctime)s] %(message)s",
     )
 
-    config_path = Path("rarifyconfig.yml" if len(sys.argv) < 2 else sys.argv[1])
+    try:
+        config_path = Path("rarifyconfig.yml" if len(sys.argv) < 2 else sys.argv[1])
 
-    knowledge_base, config, item_configs = load_data(config_path)
+        knowledge_base, config, item_configs = load_data(config_path)
 
-    alter_chances(knowledge_base, config, item_configs)
-    save_new_drops(knowledge_base, config)
+        alter_chances(knowledge_base, config, item_configs)
+        save_new_drops(knowledge_base, config)
+    except:
+        logging.exception("Error while running Rarify ...")
+        raise
 
 
 if __name__ == "__main__":
