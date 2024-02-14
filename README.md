@@ -12,9 +12,9 @@ items:
   - name: Open Circuit Shirt
     CRATEs till item: 1200
   - name: Couture Rifle
-    kills-till-item: 12000
+    Kills Till Item: 12000
   - name: Hot Pants Ray Gun
-    crates-till-item-per-crate-type:
+    crates till item per crate type:
       Silver: 500
       Gold: 100
 ```

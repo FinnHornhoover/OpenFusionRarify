@@ -1,0 +1,13 @@
+---
+base: ../OpenFusion/tdata/drops.json
+xdt: ../OpenFusion/tdata/xdt.json
+output: target/
+items:
+  - name: Open Circuit Shirt
+    CRATEs till item: 1200
+  - name: Couture Rifle
+    Kills Till Item: 12000
+  - name: Hot Pants Ray Gun
+    crates till item per crate type:
+      Silver: 500
+      Gold: 100
