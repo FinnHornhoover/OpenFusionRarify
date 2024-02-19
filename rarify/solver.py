@@ -340,13 +340,18 @@ class ItemSetNode:
 
             for ir_id in int_scaled_weights:
                 if int_scaled_weights[ir_id] == 0:
-                    max_weight_ir_id, _ = max(
+                    max_weight_ir_id, max_weight = max(
                         int_scaled_weights.items(), key=itemgetter(1)
                     )
-                    int_scaled_weights[ir_id] = 1
-                    int_scaled_weights[max_weight_ir_id] -= 1
+                    if max_weight > 1:
+                        int_scaled_weights[ir_id] = 1
+                        int_scaled_weights[max_weight_ir_id] -= 1
 
-            return int_scaled_weights
+            return {
+                ir_id: weight
+                for ir_id, weight in int_scaled_weights.items()
+                if weight > 0
+            }
 
         log_scaled_weights = {}
         for rarity_dicts in merged_probs.values():
