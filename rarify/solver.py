@@ -279,7 +279,10 @@ class ItemSetNode:
 
             if shared_ir_ids:
                 # it seems to be more accurate for both cases to take the maximum distance here, not sure why
-                select_ir_id = max(shared_ir_ids, key=lambda i: abs(cur_acc_dict[i] - cur_other_dict[i]))
+                select_ir_id = max(
+                    shared_ir_ids,
+                    key=lambda i: abs(cur_acc_dict[i] - cur_other_dict[i]),
+                )
                 other_to_scale = cur_acc_dict[select_ir_id]
                 acc_to_scale = cur_other_dict[select_ir_id]
                 cur_other_dict = {
