@@ -112,7 +112,7 @@ And using OpenFusionRarify, it takes less than a second to produce a valid drops
 [Download one of our ZIP files](https://github.com/FinnHornhoover/OpenFusionRarify/releases/latest) and extract it anywhere. For our demo, it is assumed that folder you extract into is at the same level as your OpenFusion server folder, i.e.
 ```
 SomeDirectory/
-  OpenFusion/
+    OpenFusion/
         tdata/
             drops.json
             patch/
