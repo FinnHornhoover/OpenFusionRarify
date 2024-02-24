@@ -1,0 +1,4 @@
+---
+base: ../OpenFusion/tdata/drops.json
+xdt: ../OpenFusion/tdata/xdt.json
+output: target/
