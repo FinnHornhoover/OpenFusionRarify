@@ -1,14 +1,22 @@
 import json
 import logging
 from operator import itemgetter
-from collections import defaultdict
 from typing import Dict, List, Set
 
 from rarify.drops import Data
 from rarify.config import Config
 from rarify.knowledge_base import KnowledgeBase
 from rarify.config import ItemConfig  # import this AFTER KnowledgeBase
-from rarify.math import inv, rel_diff, normalize, ln, exp, logsumexp, NINF
+from rarify.math import (
+    inv,
+    rel_diff,
+    normalize,
+    get_value_mode,
+    ln,
+    exp,
+    logsumexp,
+    NINF,
+)
 from rarify.injections import (
     ConfigKnowledgeBase,
     ItemSetNode,
@@ -169,6 +177,39 @@ def remove_zero_prob_entries(
     }
 
 
+def rescale_one_prob_entries(
+    merged_probs: Dict[int, Dict[int, Dict[int, float]]],
+    log_scaled_weights: Dict[int, float],
+) -> Dict[int, float]:
+    ir_id_set = {
+        ir_id
+        for rarity_dicts in merged_probs.values()
+        for prob_dict in rarity_dicts.values()
+        for ir_id in prob_dict
+    }
+
+    one_entries = {
+        ir_id
+        for ir_id in ir_id_set
+        if all(
+            len(prob_dict) == 1
+            for rarity_dicts in merged_probs.values()
+            for prob_dict in rarity_dicts.values()
+            if ir_id in prob_dict
+        )
+    }
+
+    if not one_entries:
+        return log_scaled_weights
+
+    mode = get_value_mode(log_scaled_weights)
+
+    return {
+        ir_id: mode if ir_id in one_entries else log_weight
+        for ir_id, log_weight in log_scaled_weights.items()
+    }
+
+
 def get_scaled_int_weights(
     merged_probs: Dict[int, Dict[int, Dict[int, float]]],
     altered_ir_ids: Set[int],
@@ -176,6 +217,7 @@ def get_scaled_int_weights(
     scale_max: int,
 ) -> Dict[int, int]:
     log_scaled_weights = {}
+
     for rarity_dicts in merged_probs.values():
         gender_scaled_weights = {}
 
@@ -189,6 +231,8 @@ def get_scaled_int_weights(
             altered_ir_ids, log_scaled_weights, gender_scaled_weights
         )
 
+    log_scaled_weights = rescale_one_prob_entries(merged_probs, log_scaled_weights)
+
     log_split_weights = {
         gender_id: {
             rarity_id: {ir_id: log_scaled_weights[ir_id] for ir_id in pool_dict}
@@ -196,14 +240,13 @@ def get_scaled_int_weights(
         }
         for gender_id, rarity_dicts in merged_probs.items()
     }
-    max_split_sum = max(
-        [
-            logsumexp(pool_dict)
-            for rarity_dicts in log_split_weights.values()
-            for pool_dict in rarity_dicts.values()
-            if pool_dict
-        ]
-    )
+    split_sums = [
+        logsumexp(pool_dict)
+        for rarity_dicts in log_split_weights.values()
+        for pool_dict in rarity_dicts.values()
+        if pool_dict
+    ]
+    max_split_sum = max(split_sums) if split_sums else 0.0
     rescaled_weights = {
         ir_id: exp(value - max_split_sum) for ir_id, value in log_scaled_weights.items()
     }
@@ -223,10 +266,6 @@ def get_scaled_int_weights(
 
 
 def adjust_weight_settings(itemset: Data, weights: Dict[int, int]) -> None:
-    counts = defaultdict(int)
-    for weight in weights.values():
-        counts[weight] += 1
-
     existing_ids = dict.fromkeys(itemset["ItemReferenceIDs"])
     entry_list = []
 
@@ -238,7 +277,7 @@ def adjust_weight_settings(itemset: Data, weights: Dict[int, int]) -> None:
         if ir_id not in existing_ids:
             entry_list.append((ir_id, weight))
 
-    itemset["DefaultItemWeight"] = max(counts.items(), key=itemgetter(1))[0]
+    itemset["DefaultItemWeight"] = get_value_mode(weights)
     itemset["ItemReferenceIDs"] = [ir_id for ir_id, _ in entry_list]
     itemset["AlterItemWeightMap"] = {
         str(ir_id): weight

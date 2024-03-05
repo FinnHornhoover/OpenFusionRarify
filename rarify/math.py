@@ -1,5 +1,6 @@
 import math
-from typing import Dict
+from typing import Any, Dict
+from collections import Counter
 
 
 INF = math.inf
@@ -27,6 +28,10 @@ def rel_diff(a: float, b: float, inf: float = INF) -> float:
 def normalize(d: Dict[int, float]) -> Dict[int, float]:
     s = sum(d.values())
     return {k: v * inv(s, inf=0.0) for k, v in d.items()}
+
+
+def get_value_mode(dct: Dict[Any, float]) -> float:
+    return Counter(dct.values()).most_common(1)[0][0]
 
 
 def exp(a: float) -> float:
